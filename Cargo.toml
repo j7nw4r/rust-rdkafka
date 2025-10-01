@@ -1,6 +1,6 @@
 [package]
 name = "rdkafka-redux"
-version = "0.38.0"
+version = "0.38.1"
 authors = ["Johnathan Walker <j7n.w4r@gmail.com>"]
 repository = "https://github.com/j7nw4r/rust-rdkafka-redux"
 readme = "README.md"
