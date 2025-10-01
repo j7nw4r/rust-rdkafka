@@ -1,24 +1,26 @@
-# rust-rdkafka
+# rust-rdkafka-redux
+
+**The goal of this crate is to be a more maintained [rust-rdkafka](https://github.com/fede1024/rust-rdkafka). As such there will be an initial period where we are working on the issues from that repo. Also forgive any broken links as we attempt a cut over.**
 
 [![crates.io](https://img.shields.io/crates/v/rdkafka.svg)](https://crates.io/crates/rdkafka)
 [![docs.rs](https://docs.rs/rdkafka/badge.svg)](https://docs.rs/rdkafka/)
-[![Build Status](https://travis-ci.org/fede1024/rust-rdkafka.svg?branch=master)](https://travis-ci.org/fede1024/rust-rdkafka)
-[![coverate](https://codecov.io/gh/fede1024/rust-rdkafka/graphs/badge.svg?branch=master)](https://codecov.io/gh/fede1024/rust-rdkafka/)
-[![Join the chat at https://gitter.im/rust-rdkafka/Lobby](https://badges.gitter.im/rust-rdkafka/Lobby.svg)](https://gitter.im/rust-rdkafka/Lobby?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+[![Build Status](https://travis-ci.org/fede1024/rust-rdkafka-redux.svg?branch=master)](https://travis-ci.org/fede1024/rust-rdkafka-redux)
+[![coverate](https://codecov.io/gh/fede1024/rust-rdkafka-redux/graphs/badge.svg?branch=master)](https://codecov.io/gh/fede1024/rust-rdkafka-redux/)
+[![Join the chat at https://gitter.im/rust-rdkafka-redux/Lobby](https://badges.gitter.im/rust-rdkafka-redux/Lobby.svg)](https://gitter.im/rust-rdkafka-redux/Lobby?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 
 A fully asynchronous, [futures]-enabled [Apache Kafka] client
 library for Rust based on [librdkafka].
 
 ## The library
 
-`rust-rdkafka` provides a safe Rust interface to librdkafka. This version
+`rust-rdkafka-redux` provides a safe Rust interface to librdkafka. This version
 is compatible with librdkafka v1.9.2+.
 
 ### Documentation
 
-- [Current master branch](https://fede1024.github.io/rust-rdkafka/)
+- [Current master branch](https://fede1024.github.io/rust-rdkafka-redux/)
 - [Latest release](https://docs.rs/rdkafka/)
-- [Changelog](https://github.com/fede1024/rust-rdkafka/blob/master/changelog.md)
+- [Changelog](https://github.com/fede1024/rust-rdkafka-redux/blob/master/changelog.md)
 
 ### Features
 
@@ -44,7 +46,7 @@ The main features provided at the moment are:
 
 ### One million messages per second
 
-`rust-rdkafka` is designed to be easy and safe to use thanks to the
+`rust-rdkafka-redux` is designed to be easy and safe to use thanks to the
 abstraction layer written in Rust, while at the same time being extremely
 fast thanks to the librdkafka C library.
 
@@ -63,7 +65,7 @@ For more numbers, check out the [kafka-benchmark] project.
 
 ### Client types
 
-`rust-rdkafka` provides low level and high level consumers and producers.
+`rust-rdkafka-redux` provides low level and high level consumers and producers.
 
 Low level:
 
@@ -93,11 +95,11 @@ to change.
 
 [Tokio] is a platform for fast processing of asynchronous events in Rust.
 The interfaces exposed by the [`StreamConsumer`] and the [`FutureProducer`]
-allow rust-rdkafka users to easily integrate Kafka consumers and producers
+allow rust-rdkafka-redux users to easily integrate Kafka consumers and producers
 within the Tokio platform, and write asynchronous message processing code.
-Note that rust-rdkafka can be used without Tokio.
+Note that rust-rdkafka-redux can be used without Tokio.
 
-To see rust-rdkafka in action with Tokio, check out the
+To see rust-rdkafka-redux in action with Tokio, check out the
 [asynchronous processing example] in the examples folder.
 
 ### At-least-once delivery
@@ -128,19 +130,19 @@ will only observe committed messages.
 EOS is useful in read-process-write scenarios that require messages to be
 processed exactly once.
 
-To learn more about using transactions in rust-rdkafka, see the
+To learn more about using transactions in rust-rdkafka-redux, see the
 [Transactions][producer-transactions] section of the producer documentation.
 
 ### Users
 
-Here are some of the projects using rust-rdkafka:
+Here are some of the projects using rust-rdkafka-redux:
 
 - [kafka-view]: a web interface for Kafka clusters.
 - [kafka-benchmark]: a high performance benchmarking tool for Kafka.
 - [callysto]: Stream processing framework in Rust.
 - [bytewax]: Python stream processing framework using Timely Dataflow.
 
-*If you are using rust-rdkafka, please let us know!*
+*If you are using rust-rdkafka-redux, please let us know!*
 
 ## Installation
 
@@ -188,7 +190,7 @@ re-exported as rdkafka features.
 
 The current minimum supported Rust version (MSRV) is 1.70.0. Note that
 bumping the MSRV is not considered a breaking change. Any release of
-rust-rdkafka may bump the MSRV.
+rust-rdkafka-redux may bump the MSRV.
 
 ### Asynchronous runtimes
 
@@ -203,7 +205,7 @@ rdkafka = { version = "0.25", default-features = false }
 ```
 
 If you would like to use an asynchronous runtime besides Tokio, you can
-integrate it with rust-rdkafka by providing a shim that implements the
+integrate it with rust-rdkafka-redux by providing a shim that implements the
 [`AsyncRuntime`] trait. See the following examples for details:
 
   * [smol][runtime-smol]
@@ -219,11 +221,11 @@ cargo run --example <example_name> -- <example_args>
 
 ## Debugging
 
-rust-rdkafka uses the [`log`] crate to handle logging.
+rust-rdkafka-redux uses the [`log`] crate to handle logging.
 Optionally, enable the `tracing` feature to emit [`tracing`]
 events as opposed to [`log`] records.
 
-In test and examples, rust-rdkafka uses the  [`env_logger`] crate
+In test and examples, rust-rdkafka-redux uses the  [`env_logger`] crate
 to format logs. In those contexts, logging can be enabled
 using the `RUST_LOG` environment variable, for example:
 
@@ -253,14 +255,14 @@ logging framework.
 [`tracing`]: https://docs.rs/tracing
 [`env_logger`]: https://docs.rs/env_logger
 [Apache Kafka]: https://kafka.apache.org
-[asynchronous processing example]: https://github.com/fede1024/rust-rdkafka/blob/master/examples/asynchronous_processing.rs
-[at-least-once delivery example]: https://github.com/fede1024/rust-rdkafka/blob/master/examples/at_least_once.rs
-[runtime-smol]: https://github.com/fede1024/rust-rdkafka/blob/master/examples/runtime_smol.rs
-[runtime-async-std]: https://github.com/fede1024/rust-rdkafka/blob/master/examples/runtime_async_std.rs
+[asynchronous processing example]: https://github.com/fede1024/rust-rdkafka-redux/blob/master/examples/asynchronous_processing.rs
+[at-least-once delivery example]: https://github.com/fede1024/rust-rdkafka-redux/blob/master/examples/at_least_once.rs
+[runtime-smol]: https://github.com/fede1024/rust-rdkafka-redux/blob/master/examples/runtime_smol.rs
+[runtime-async-std]: https://github.com/fede1024/rust-rdkafka-redux/blob/master/examples/runtime_async_std.rs
 [broker-compat]: https://github.com/edenhill/librdkafka/blob/master/INTRODUCTION.md#broker-version-compatibility
 [bytewax]: https://github.com/bytewax/bytewax
 [callysto]: https://github.com/vertexclique/callysto
-[`examples`]: https://github.com/fede1024/rust-rdkafka/blob/master/examples/
+[`examples`]: https://github.com/fede1024/rust-rdkafka-redux/blob/master/examples/
 [futures]: https://github.com/rust-lang/futures-rs
 [kafka-benchmark]: https://github.com/fede1024/kafka-benchmark
 [kafka-view]: https://github.com/fede1024/kafka-view
@@ -268,8 +270,8 @@ logging framework.
 [librdkafka-config]: https://github.com/edenhill/librdkafka/blob/master/CONFIGURATION.md
 [message delivery semantics]: https://kafka.apache.org/0101/documentation.html#semantics
 [producer-transactions]: https://docs.rs/rdkafka/*/rdkafka/producer/#transactions
-[rdkafka-sys-features]: https://github.com/fede1024/rust-rdkafka/tree/master/rdkafka-sys/README.md#features
-[rdkafka-sys-known-issues]: https://github.com/fede1024/rust-rdkafka/tree/master/rdkafka-sys/README.md#known-issues
+[rdkafka-sys-features]: https://github.com/fede1024/rust-rdkafka-redux/tree/master/rdkafka-sys/README.md#features
+[rdkafka-sys-known-issues]: https://github.com/fede1024/rust-rdkafka-redux/tree/master/rdkafka-sys/README.md#known-issues
 [smol]: https://docs.rs/smol
 [Tokio]: https://tokio.rs/
 
@@ -279,8 +281,6 @@ See [rdkafka-sys](https://github.com/fede1024/rust-rdkafka/tree/master/rdkafka-s
 
 ## Contributors
 
-Thanks to:
-* Thijs Cadier - [thijsc](https://github.com/thijsc)
 
 ## Alternatives
 
