@@ -2,11 +2,8 @@
 
 **The goal of this crate is to be a more maintained [rust-rdkafka](https://github.com/fede1024/rust-rdkafka). As such there will be an initial period where we are working on the issues from that repo. Also forgive any broken links as we attempt a cut over.**
 
-[![crates.io](https://img.shields.io/crates/v/rdkafka.svg)](https://crates.io/crates/rdkafka)
-[![docs.rs](https://docs.rs/rdkafka/badge.svg)](https://docs.rs/rdkafka/)
-[![Build Status](https://travis-ci.org/fede1024/rust-rdkafka-redux.svg?branch=master)](https://travis-ci.org/fede1024/rust-rdkafka-redux)
-[![coverate](https://codecov.io/gh/fede1024/rust-rdkafka-redux/graphs/badge.svg?branch=master)](https://codecov.io/gh/fede1024/rust-rdkafka-redux/)
-[![Join the chat at https://gitter.im/rust-rdkafka-redux/Lobby](https://badges.gitter.im/rust-rdkafka-redux/Lobby.svg)](https://gitter.im/rust-rdkafka-redux/Lobby?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+[![crates.io](https://img.shields.io/crates/v/rdkafka-redux.svg)](https://crates.io/crates/rdkafka-redux)
+[![docs.rs](https://docs.rs/rdkafka-redux/badge.svg)](https://docs.rs/rdkafka-redux/)
 
 A fully asynchronous, [futures]-enabled [Apache Kafka] client
 library for Rust based on [librdkafka].
