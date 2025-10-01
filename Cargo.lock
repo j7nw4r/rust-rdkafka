@@ -1195,7 +1195,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rdkafka"
+name = "rdkafka-redux"
 version = "0.38.0"
 dependencies = [
  "async-std",

@@ -1,8 +1,8 @@
 [package]
-name = "rdkafka"
+name = "rdkafka-redux"
 version = "0.38.0"
-authors = ["Federico Giraud <giraud.federico@gmail.com>"]
-repository = "https://github.com/fede1024/rust-rdkafka"
+authors = ["Johnathan Walker <j7n.w4r@gmail.com>"]
+repository = "https://github.com/j7nw4r/rust-rdkafka-redux"
 readme = "README.md"
 license = "MIT"
 description = "Rust wrapper for librdkafka"
