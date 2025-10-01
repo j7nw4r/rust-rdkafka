@@ -150,7 +150,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rdkafka = { version = "0.25", features = ["cmake-build"] }
+rdkafka-redux = { version = "0.25", features = ["cmake-build"] }
 ```
 
 This crate will compile librdkafka from sources and link it statically to
@@ -175,7 +175,7 @@ the system's version of librdkafka. Example:
 
 ```toml
 [dependencies]
-rdkafka = { version = "0.25", features = ["dynamic-linking"] }
+rdkafka-redux = { version = "0.25", features = ["dynamic-linking"] }
 ```
 
 If you'd like to compile librdkafka statically yourself, then use
@@ -201,7 +201,7 @@ enabled by default, but can be disabled by turning off default features:
 
 ```toml
 [dependencies]
-rdkafka = { version = "0.25", default-features = false }
+rdkafka-redux = { version = "0.25", default-features = false }
 ```
 
 If you would like to use an asynchronous runtime besides Tokio, you can
@@ -230,7 +230,7 @@ to format logs. In those contexts, logging can be enabled
 using the `RUST_LOG` environment variable, for example:
 
 ```bash
-RUST_LOG="librdkafka=trace,rdkafka::client=debug" cargo test
+RUST_LOG="librdkafka=trace,rdkafka-redux::client=debug" cargo test
 ```
 
 This will configure the logging level of librdkafka to trace, and the level
