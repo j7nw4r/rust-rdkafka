@@ -8,15 +8,15 @@ use std::time::Duration;
 use rand::distr::{Alphanumeric, SampleString};
 use regex::Regex;
 
-use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
-use rdkafka::client::ClientContext;
-use rdkafka::config::ClientConfig;
-use rdkafka::consumer::ConsumerContext;
-use rdkafka::error::KafkaResult;
-use rdkafka::message::ToBytes;
-use rdkafka::producer::{FutureProducer, FutureRecord};
-use rdkafka::statistics::Statistics;
-use rdkafka::TopicPartitionList;
+use rdkafka_redux::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
+use rdkafka_redux::client::ClientContext;
+use rdkafka_redux::config::ClientConfig;
+use rdkafka_redux::consumer::ConsumerContext;
+use rdkafka_redux::error::KafkaResult;
+use rdkafka_redux::message::ToBytes;
+use rdkafka_redux::producer::{FutureProducer, FutureRecord};
+use rdkafka_redux::statistics::Statistics;
+use rdkafka_redux::TopicPartitionList;
 
 pub fn rand_test_topic(test_name: &str) -> String {
     let id = Alphanumeric.sample_string(&mut rand::rng(), 10);

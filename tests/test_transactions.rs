@@ -7,13 +7,13 @@ use std::time::Duration;
 use log::info;
 use maplit::hashmap;
 
-use rdkafka::config::ClientConfig;
-use rdkafka::config::RDKafkaLogLevel;
-use rdkafka::consumer::{BaseConsumer, CommitMode, Consumer};
-use rdkafka::error::KafkaError;
-use rdkafka::producer::{BaseProducer, BaseRecord, Producer};
-use rdkafka::topic_partition_list::{Offset, TopicPartitionList};
-use rdkafka::util::Timeout;
+use rdkafka_redux::config::ClientConfig;
+use rdkafka_redux::config::RDKafkaLogLevel;
+use rdkafka_redux::consumer::{BaseConsumer, CommitMode, Consumer};
+use rdkafka_redux::error::KafkaError;
+use rdkafka_redux::producer::{BaseProducer, BaseRecord, Producer};
+use rdkafka_redux::topic_partition_list::{Offset, TopicPartitionList};
+use rdkafka_redux::util::Timeout;
 
 use utils::*;
 

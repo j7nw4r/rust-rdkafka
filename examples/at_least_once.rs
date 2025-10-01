@@ -17,15 +17,15 @@ use clap::{Arg, Command};
 use futures::future;
 use log::{info, warn};
 
-use rdkafka::client::ClientContext;
-use rdkafka::config::{ClientConfig, RDKafkaLogLevel};
-use rdkafka::consumer::stream_consumer::StreamConsumer;
-use rdkafka::consumer::{Consumer, ConsumerContext};
-use rdkafka::error::KafkaResult;
-use rdkafka::producer::{FutureProducer, FutureRecord};
-use rdkafka::topic_partition_list::TopicPartitionList;
-use rdkafka::util::get_rdkafka_version;
-use rdkafka::Message;
+use rdkafka_redux::client::ClientContext;
+use rdkafka_redux::config::{ClientConfig, RDKafkaLogLevel};
+use rdkafka_redux::consumer::stream_consumer::StreamConsumer;
+use rdkafka_redux::consumer::{Consumer, ConsumerContext};
+use rdkafka_redux::error::KafkaResult;
+use rdkafka_redux::producer::{FutureProducer, FutureRecord};
+use rdkafka_redux::topic_partition_list::TopicPartitionList;
+use rdkafka_redux::util::get_rdkafka_version;
+use rdkafka_redux::Message;
 
 use crate::example_utils::setup_logger;
 

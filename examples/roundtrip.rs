@@ -4,10 +4,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use clap::{Arg, Command};
 use hdrhistogram::Histogram;
 
-use rdkafka::config::ClientConfig;
-use rdkafka::consumer::{Consumer, StreamConsumer};
-use rdkafka::message::Message;
-use rdkafka::producer::{FutureProducer, FutureRecord};
+use rdkafka_redux::config::ClientConfig;
+use rdkafka_redux::consumer::{Consumer, StreamConsumer};
+use rdkafka_redux::message::Message;
+use rdkafka_redux::producer::{FutureProducer, FutureRecord};
 
 use crate::example_utils::setup_logger;
 

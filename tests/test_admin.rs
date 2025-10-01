@@ -4,17 +4,17 @@ use std::time::Duration;
 
 use backon::{BlockingRetryable, ExponentialBuilder};
 
-use rdkafka::admin::{
+use rdkafka_redux::admin::{
     AdminClient, AdminOptions, AlterConfig, ConfigEntry, ConfigSource, GroupResult, NewPartitions,
     NewTopic, OwnedResourceSpecifier, ResourceSpecifier, TopicReplication,
 };
-use rdkafka::client::DefaultClientContext;
-use rdkafka::consumer::{BaseConsumer, CommitMode, Consumer, DefaultConsumerContext};
-use rdkafka::error::{KafkaError, RDKafkaErrorCode};
-use rdkafka::metadata::Metadata;
-use rdkafka::producer::{FutureProducer, FutureRecord, Producer};
-use rdkafka::{ClientConfig, Offset, TopicPartitionList};
-
+use rdkafka_redux::client::DefaultClientContext;
+use rdkafka_redux::consumer::{BaseConsumer, CommitMode, Consumer, DefaultConsumerContext};
+use rdkafka_redux::error::{KafkaError};
+use rdkafka_redux::metadata::Metadata;
+use rdkafka_redux::producer::{FutureProducer, FutureRecord, Producer};
+use rdkafka_redux::{ClientConfig, Offset, TopicPartitionList};
+use rdkafka_sys::RDKafkaErrorCode;
 use crate::utils::*;
 
 mod utils;

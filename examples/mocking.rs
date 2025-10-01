@@ -5,11 +5,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use hdrhistogram::Histogram;
 
-use rdkafka::config::ClientConfig;
-use rdkafka::consumer::{Consumer, StreamConsumer};
-use rdkafka::message::Message;
-use rdkafka::mocking::MockCluster;
-use rdkafka::producer::{FutureProducer, FutureRecord};
+use rdkafka_redux::config::ClientConfig;
+use rdkafka_redux::consumer::{Consumer, StreamConsumer};
+use rdkafka_redux::message::Message;
+use rdkafka_redux::mocking::MockCluster;
+use rdkafka_redux::producer::{FutureProducer, FutureRecord};
 
 #[tokio::main]
 async fn main() {

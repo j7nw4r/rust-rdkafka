@@ -10,16 +10,16 @@ use std::time::Duration;
 
 use maplit::hashmap;
 
-use rdkafka::config::ClientConfig;
-use rdkafka::error::{KafkaError, RDKafkaErrorCode};
-use rdkafka::message::{Header, Headers, Message, OwnedHeaders, OwnedMessage};
-use rdkafka::producer::{
+use rdkafka_redux::config::ClientConfig;
+use rdkafka_redux::error::{KafkaError, RDKafkaErrorCode};
+use rdkafka_redux::message::{Header, Headers, Message, OwnedHeaders, OwnedMessage};
+use rdkafka_redux::producer::{
     BaseProducer, BaseRecord, DeliveryResult, NoCustomPartitioner, Partitioner, Producer,
     ProducerContext, ThreadedProducer,
 };
-use rdkafka::types::RDKafkaRespErr;
-use rdkafka::util::current_time_millis;
-use rdkafka::{ClientContext, Statistics};
+use rdkafka_redux::types::RDKafkaRespErr;
+use rdkafka_redux::util::current_time_millis;
+use rdkafka_redux::{ClientContext, Statistics};
 
 use crate::utils::*;
 

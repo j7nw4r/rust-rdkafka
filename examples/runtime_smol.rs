@@ -6,11 +6,11 @@ use clap::{Arg, Command};
 use futures::future::{self, FutureExt};
 use futures::stream::StreamExt;
 
-use rdkafka::config::ClientConfig;
-use rdkafka::consumer::{Consumer, StreamConsumer};
-use rdkafka::message::Message;
-use rdkafka::producer::{FutureProducer, FutureRecord};
-use rdkafka::util::AsyncRuntime;
+use rdkafka_redux::config::ClientConfig;
+use rdkafka_redux::consumer::{Consumer, StreamConsumer};
+use rdkafka_redux::message::Message;
+use rdkafka_redux::producer::{FutureProducer, FutureRecord};
+use rdkafka_redux::util::AsyncRuntime;
 
 use crate::example_utils::setup_logger;
 

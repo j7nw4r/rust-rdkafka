@@ -267,7 +267,7 @@ where
     /// All these are equivalent and will receive messages without timing out.
     ///
     /// ```rust,no_run
-    /// # let consumer: rdkafka::consumer::BaseConsumer<_> = rdkafka::ClientConfig::new()
+    /// # let consumer: rdkafka_redux::consumer::BaseConsumer<_> = rdkafka_redux::ClientConfig::new()
     /// #    .create()
     /// #    .unwrap();
     /// #
@@ -278,7 +278,7 @@ where
     /// ```
     ///
     /// ```rust,no_run
-    /// # let consumer: rdkafka::consumer::BaseConsumer<_> = rdkafka::ClientConfig::new()
+    /// # let consumer: rdkafka_redux::consumer::BaseConsumer<_> = rdkafka_redux::ClientConfig::new()
     /// #    .create()
     /// #    .unwrap();
     /// #

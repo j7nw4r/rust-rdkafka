@@ -2,10 +2,10 @@
 
 use std::time::Duration;
 
-use rdkafka::config::ClientConfig;
-use rdkafka::consumer::{Consumer, StreamConsumer};
-use rdkafka::error::KafkaError;
-use rdkafka::topic_partition_list::TopicPartitionList;
+use rdkafka_redux::config::ClientConfig;
+use rdkafka_redux::consumer::{Consumer, StreamConsumer};
+use rdkafka_redux::error::KafkaError;
+use rdkafka_redux::topic_partition_list::TopicPartitionList;
 
 use rdkafka_sys::types::RDKafkaConfRes;
 

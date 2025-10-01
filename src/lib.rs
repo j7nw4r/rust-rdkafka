@@ -218,7 +218,7 @@
 //! using the `RUST_LOG` environment variable, for example:
 //!
 //! ```bash
-//! RUST_LOG="librdkafka=trace,rdkafka::client=debug" cargo test
+//! RUST_LOG="librdkafka=trace,rdkafka_redux::client=debug" cargo test
 //! ```
 //!
 //! This will configure the logging level of librdkafka to trace, and the level

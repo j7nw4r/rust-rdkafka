@@ -10,11 +10,11 @@ use maplit::hashmap;
 use rdkafka_sys::RDKafkaErrorCode;
 use tokio::time::{self, Duration};
 
-use rdkafka::consumer::{CommitMode, Consumer, ConsumerContext, StreamConsumer};
-use rdkafka::error::KafkaError;
-use rdkafka::topic_partition_list::{Offset, TopicPartitionList};
-use rdkafka::util::current_time_millis;
-use rdkafka::{Message, Timestamp};
+use rdkafka_redux::consumer::{CommitMode, Consumer, ConsumerContext, StreamConsumer};
+use rdkafka_redux::error::KafkaError;
+use rdkafka_redux::topic_partition_list::{Offset, TopicPartitionList};
+use rdkafka_redux::util::current_time_millis;
+use rdkafka_redux::{Message, Timestamp};
 use rdkafka_sys::types::RDKafkaConfRes;
 
 use crate::utils::*;

@@ -3,10 +3,10 @@ use std::time::Duration;
 use clap::{Arg, Command};
 use log::info;
 
-use rdkafka::config::ClientConfig;
-use rdkafka::message::{Header, OwnedHeaders};
-use rdkafka::producer::{FutureProducer, FutureRecord};
-use rdkafka::util::get_rdkafka_version;
+use rdkafka_redux::config::ClientConfig;
+use rdkafka_redux::message::{Header, OwnedHeaders};
+use rdkafka_redux::producer::{FutureProducer, FutureRecord};
+use rdkafka_redux::util::get_rdkafka_version;
 
 use crate::example_utils::setup_logger;
 

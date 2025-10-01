@@ -3,8 +3,8 @@ use std::time::Duration;
 use clap::{Arg, Command};
 use log::trace;
 
-use rdkafka::config::ClientConfig;
-use rdkafka::consumer::{BaseConsumer, Consumer};
+use rdkafka_redux::config::ClientConfig;
+use rdkafka_redux::consumer::{BaseConsumer, Consumer};
 
 use crate::example_utils::setup_logger;
 

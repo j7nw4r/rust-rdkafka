@@ -5,13 +5,13 @@ use std::time::{Duration, Instant};
 
 use futures::stream::{FuturesUnordered, StreamExt};
 
-use rdkafka::client::DefaultClientContext;
-use rdkafka::config::ClientConfig;
-use rdkafka::error::{KafkaError, RDKafkaErrorCode};
-use rdkafka::message::{Header, Headers, Message, OwnedHeaders};
-use rdkafka::producer::{FutureProducer, FutureRecord, Producer};
-use rdkafka::util::Timeout;
-use rdkafka::Timestamp;
+use rdkafka_redux::client::DefaultClientContext;
+use rdkafka_redux::config::ClientConfig;
+use rdkafka_redux::error::{KafkaError, RDKafkaErrorCode};
+use rdkafka_redux::message::{Header, Headers, Message, OwnedHeaders};
+use rdkafka_redux::producer::{FutureProducer, FutureRecord, Producer};
+use rdkafka_redux::util::Timeout;
+use rdkafka_redux::Timestamp;
 
 use crate::utils::*;
 
