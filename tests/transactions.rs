@@ -78,7 +78,10 @@ async fn count_records(
 
     let consumer = create_consumer(
         kafka_context,
-        Some(&[("isolation.level", isolation), ("enable.partition.eof", "true")]),
+        Some(&[
+            ("isolation.level", isolation),
+            ("enable.partition.eof", "true"),
+        ]),
     )
     .await?;
 
@@ -124,9 +127,10 @@ async fn test_transaction_abort() -> Result<(), Box<dyn Error>> {
         .await
         .expect("could not create produce topic");
 
-    let future_producer = producer::future_producer::create_producer(&kafka_context.bootstrap_servers)
-        .await
-        .expect("Could not create Future producer");
+    let future_producer =
+        producer::future_producer::create_producer(&kafka_context.bootstrap_servers)
+            .await
+            .expect("Could not create Future producer");
     let _ = produce_messages_to_partition(&future_producer, &consume_topic, 30, 0).await;
 
     // Create consumer and subscribe to `consume_topic`.
@@ -172,11 +176,21 @@ async fn test_transaction_abort() -> Result<(), Box<dyn Error>> {
     // Check that no records were produced in read committed mode, but that
     // the records are visible in read uncommitted mode.
     assert_eq!(
-        count_records(&kafka_context, &produce_topic, IsolationLevel::ReadCommitted).await?,
+        count_records(
+            &kafka_context,
+            &produce_topic,
+            IsolationLevel::ReadCommitted
+        )
+        .await?,
         0,
     );
     assert_eq!(
-        count_records(&kafka_context, &produce_topic, IsolationLevel::ReadUncommitted).await?,
+        count_records(
+            &kafka_context,
+            &produce_topic,
+            IsolationLevel::ReadUncommitted
+        )
+        .await?,
         10,
     );
 
@@ -221,9 +235,10 @@ async fn test_transaction_commit() -> Result<(), Box<dyn Error>> {
         .await
         .expect("could not create produce topic");
 
-    let future_producer = producer::future_producer::create_producer(&kafka_context.bootstrap_servers)
-        .await
-        .expect("Could not create Future producer");
+    let future_producer =
+        producer::future_producer::create_producer(&kafka_context.bootstrap_servers)
+            .await
+            .expect("Could not create Future producer");
     let _ = produce_messages_to_partition(&future_producer, &consume_topic, 30, 0).await;
 
     // Create consumer and subscribe to `consume_topic`.
@@ -264,11 +279,21 @@ async fn test_transaction_commit() -> Result<(), Box<dyn Error>> {
 
     // Check that 10 records were produced.
     assert_eq!(
-        count_records(&kafka_context, &produce_topic, IsolationLevel::ReadUncommitted).await?,
+        count_records(
+            &kafka_context,
+            &produce_topic,
+            IsolationLevel::ReadUncommitted
+        )
+        .await?,
         10,
     );
     assert_eq!(
-        count_records(&kafka_context, &produce_topic, IsolationLevel::ReadCommitted).await?,
+        count_records(
+            &kafka_context,
+            &produce_topic,
+            IsolationLevel::ReadCommitted
+        )
+        .await?,
         10,
     );
 

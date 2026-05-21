@@ -17,12 +17,12 @@ pub async fn create_topic(
     topic_name: &'_ str,
 ) -> anyhow::Result<String> {
     let topic_results = admin_client
-        .create_topics(&new_topic_vec(&topic_name, None), &AdminOptions::default())
+        .create_topics(&new_topic_vec(topic_name, None), &AdminOptions::default())
         .await
         .context("error creating topics")?;
     for topic_result in topic_results {
-        if topic_result.is_err() {
-            bail!("failed to create topic: {:?}", topic_result.unwrap_err());
+        if let Err(err) = topic_result {
+            bail!("failed to create topic: {:?}", err);
         };
     }
     Ok(topic_name.to_string())
@@ -30,7 +30,7 @@ pub async fn create_topic(
 
 pub fn new_topic_vec(topic_name: &'_ str, num_partitions: Option<i32>) -> Vec<NewTopic<'_>> {
     let new_topic = NewTopic::new(
-        &topic_name,
+        topic_name,
         num_partitions.unwrap_or(1),
         TopicReplication::Fixed(1),
     );

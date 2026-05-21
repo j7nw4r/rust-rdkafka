@@ -11,7 +11,7 @@ use rdkafka_sys::RDKafkaErrorCode;
 use tokio::time::{self, Duration};
 
 use rdkafka::admin::AdminOptions;
-use rdkafka::consumer::{CommitMode, Consumer, ConsumerContext, StreamConsumer};
+use rdkafka::consumer::{CommitMode, Consumer, StreamConsumer};
 use rdkafka::error::KafkaError;
 use rdkafka::topic_partition_list::{Offset, TopicPartitionList};
 use rdkafka::util::current_time_millis;

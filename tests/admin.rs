@@ -1,12 +1,12 @@
 use crate::utils::admin::create_topic;
 use crate::utils::containers::KafkaContext;
 use crate::utils::logging::init_test_logger;
-use crate::utils::rand::{rand_test_group, rand_test_topic};
+use crate::utils::rand::rand_test_topic;
 use crate::utils::{get_broker_version, KafkaVersion};
 use backon::{BlockingRetryable, ExponentialBuilder};
 use rdkafka::admin::{
-    AdminClient, AdminOptions, AlterConfig, ConfigEntry, ConfigSource, GroupResult, NewPartitions,
-    NewTopic, OwnedResourceSpecifier, ResourceSpecifier, TopicReplication,
+    AdminClient, AdminOptions, AlterConfig, ConfigEntry, ConfigSource, NewPartitions, NewTopic,
+    OwnedResourceSpecifier, ResourceSpecifier, TopicReplication,
 };
 use rdkafka::client::DefaultClientContext;
 use rdkafka::error::KafkaError;
@@ -42,13 +42,9 @@ pub async fn test_topic_creation() {
         );
     };
 
-    let create_topic_result = create_topic(&admin_client, &test_topic_name).await;
-    if create_topic_result.is_err() {
-        panic!(
-            "could not create topic: {}",
-            create_topic_result.unwrap_err()
-        );
-    };
+    if let Err(err) = create_topic(&admin_client, &test_topic_name).await {
+        panic!("could not create topic: {}", err);
+    }
 }
 
 /// Verify that topics are created as specified, and that they can later
@@ -101,9 +97,9 @@ pub async fn test_topic_create_and_delete() {
 
     // Verify metadata
     let metadata1 = utils::consumer::fetch_consumer_metadata(&consumer_client, &topic_name_1)
-        .expect(&format!("failed to fetch metadata for {}", &topic_name_1));
+        .unwrap_or_else(|_| panic!("failed to fetch metadata for {}", &topic_name_1));
     let metadata2 = utils::consumer::fetch_consumer_metadata(&consumer_client, &topic_name_2)
-        .expect(&format!("failed to fetch metadata for {}", topic_name_2));
+        .unwrap_or_else(|_| panic!("failed to fetch metadata for {}", topic_name_2));
     assert_eq!(1, metadata1.topics().len());
     assert_eq!(1, metadata2.topics().len());
     let metadata_topic1 = &metadata1.topics()[0];
@@ -126,10 +122,10 @@ pub async fn test_topic_create_and_delete() {
         .expect("could not describe configs");
     let topic_config1 = &config_resource_results[0]
         .as_ref()
-        .expect(&format!("failed to describe config for {}", &topic_name_1));
+        .unwrap_or_else(|_| panic!("failed to describe config for {}", &topic_name_1));
     let topic_config2 = &config_resource_results[1]
         .as_ref()
-        .expect(&format!("failed to describe config for {}", &topic_name_2));
+        .unwrap_or_else(|_| panic!("failed to describe config for {}", &topic_name_2));
     let mut expected_entry1 = ConfigEntry {
         name: "max.message.bytes".into(),
         value: Some("1234".into()),
@@ -185,7 +181,7 @@ pub async fn test_topic_create_and_delete() {
     let mut tries = 0;
     loop {
         let metadata = utils::consumer::fetch_consumer_metadata(&consumer_client, &topic_name_1)
-            .expect(&format!("failed to fetch metadata for {}", &topic_name_1));
+            .unwrap_or_else(|_| panic!("failed to fetch metadata for {}", &topic_name_1));
         let topic = &metadata.topics()[0];
         let n = topic.partitions().len();
         if n == 5 {
@@ -204,9 +200,9 @@ pub async fn test_topic_create_and_delete() {
         .expect("topic deletion failed");
     assert_eq!(res, &[Ok(topic_name_1.clone()), Ok(topic_name_2.clone())]);
     utils::consumer::verify_topic_deleted(&consumer_client, &topic_name_1)
-        .expect(&format!("could not delete topic for {}", &topic_name_1));
+        .unwrap_or_else(|_| panic!("could not delete topic for {}", &topic_name_1));
     utils::consumer::verify_topic_deleted(&consumer_client, &topic_name_2)
-        .expect(&format!("could not delete topic for {}", &topic_name_2));
+        .unwrap_or_else(|_| panic!("could not delete topic for {}", &topic_name_2));
 }
 
 /// Verify that incorrect replication configurations are ignored when
@@ -378,7 +374,7 @@ pub async fn test_mixed_success_results() {
         .expect("topic creation failed");
     assert_eq!(res, &[Ok(name1.clone())]);
     let _ = utils::consumer::fetch_consumer_metadata(&consumer_client, &name1)
-        .expect(&format!("could not fetch consumer metadata for {}", name1));
+        .unwrap_or_else(|_| panic!("could not fetch consumer metadata for {}", name1));
 
     let res = admin_client
         .create_topics(vec![&topic1, &topic2], &opts)
@@ -392,7 +388,7 @@ pub async fn test_mixed_success_results() {
         ]
     );
     let _ = utils::consumer::fetch_consumer_metadata(&consumer_client, &name2)
-        .expect(&format!("could not fetch consumer metadata for {}", name2));
+        .unwrap_or_else(|_| panic!("could not fetch consumer metadata for {}", name2));
 
     let res = admin_client
         .delete_topics(&[&name1], &opts)
@@ -400,7 +396,7 @@ pub async fn test_mixed_success_results() {
         .expect("topic deletion failed");
     assert_eq!(res, &[Ok(name1.clone())]);
     utils::consumer::verify_topic_deleted(&consumer_client, &name1)
-        .expect(&format!("could not verify topic \"{}\" was deleted", name1));
+        .unwrap_or_else(|_| panic!("could not verify topic \"{}\" was deleted", name1));
 
     let res = admin_client
         .delete_topics(&[&name2, &name1], &opts)

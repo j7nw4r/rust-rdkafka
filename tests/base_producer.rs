@@ -1,5 +1,9 @@
 //! Test data production using low level producers.
 
+// `BaseRecord` carries borrowed payload/key references plus an opaque, so the
+// `Err` half of `BaseProducer::send`'s Result is large by construction.
+#![allow(clippy::result_large_err)]
+
 use std::collections::HashSet;
 use std::error::Error;
 use std::ffi::CString;
@@ -12,8 +16,7 @@ use rdkafka::admin::AdminOptions;
 use rdkafka::error::{KafkaError, RDKafkaErrorCode};
 use rdkafka::message::{Header, Headers, Message, OwnedHeaders, OwnedMessage};
 use rdkafka::producer::{
-    BaseProducer, BaseRecord, DeliveryResult, NoCustomPartitioner, Partitioner, Producer,
-    ProducerContext, ThreadedProducer,
+    BaseRecord, DeliveryResult, NoCustomPartitioner, Partitioner, Producer, ProducerContext,
 };
 use rdkafka::types::RDKafkaRespErr;
 use rdkafka::util::current_time_millis;
@@ -211,24 +214,14 @@ async fn test_base_producer_timeout() {
     init_test_logger();
 
     let context = CollectingContext::new();
-    let kafka_context = KafkaContext::shared()
-        .await
-        .expect("could not create kafka context");
+    // Point at an unreachable broker so the producer can never deliver, then
+    // each message exhausts its short message.timeout.ms and surfaces as a
+    // MessageTimedOut delivery error. Using a real broker here would race
+    // against delivery on fast local Kafka containers.
     let topic_name = rand_test_topic("test_base_producer_timeout");
 
-    let admin_client = admin::create_admin_client(&kafka_context.bootstrap_servers)
-        .await
-        .expect("Could not create admin client");
-    admin_client
-        .create_topics(
-            &admin::new_topic_vec(&topic_name, Some(1)),
-            &AdminOptions::default(),
-        )
-        .await
-        .expect("could not create topic");
-
     let producer = base_producer_utils::create_base_producer_with_context(
-        &kafka_context.bootstrap_servers,
+        "127.0.0.1:1",
         context.clone(),
         &[("message.timeout.ms", "100")],
     )

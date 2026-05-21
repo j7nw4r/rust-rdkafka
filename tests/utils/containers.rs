@@ -4,7 +4,7 @@ use std::sync::Arc;
 use testcontainers_modules::kafka::apache::Kafka;
 use testcontainers_modules::testcontainers::core::ContainerPort;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
-use testcontainers_modules::testcontainers::{ContainerAsync, Image};
+use testcontainers_modules::testcontainers::{ContainerAsync, Image, ImageExt};
 use tokio::sync::OnceCell;
 
 pub struct KafkaContext {
@@ -53,7 +53,13 @@ async fn init() -> anyhow::Result<Arc<KafkaContext>> {
     let kafka_container = Kafka::default();
     let kafka_version = kafka_container.tag().to_string();
 
+    // Apache Kafka container defaults assume a multi-broker cluster for the
+    // transaction-state and consumer-offsets topics. Drop replication and ISR
+    // requirements so the integration tests work against a single broker.
     let kafka_node = kafka_container
+        .with_env_var("KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR", "1")
+        .with_env_var("KAFKA_TRANSACTION_STATE_LOG_MIN_ISR", "1")
+        .with_env_var("KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR", "1")
         .start()
         .await
         .context("Failed to start Kafka")?;
