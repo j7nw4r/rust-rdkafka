@@ -4,8 +4,10 @@ use std::sync::Arc;
 use testcontainers_modules::kafka::apache::Kafka;
 use testcontainers_modules::testcontainers::core::ContainerPort;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
-use testcontainers_modules::testcontainers::{ContainerAsync, Image};
+use testcontainers_modules::testcontainers::{ContainerAsync, Image, ImageExt};
 use tokio::sync::OnceCell;
+
+type KafkaImage = testcontainers_modules::testcontainers::core::ContainerRequest<Kafka>;
 
 pub struct KafkaContext {
     kafka_node: ContainerAsync<Kafka>,
@@ -50,8 +52,13 @@ impl KafkaContext {
 }
 
 async fn init() -> anyhow::Result<Arc<KafkaContext>> {
-    let kafka_container = Kafka::default();
-    let kafka_version = kafka_container.tag().to_string();
+    let kafka_container: KafkaImage = Kafka::default()
+        // The single-broker testcontainers image needs replication and ISR
+        // overrides; otherwise transactions hang because __transaction_state
+        // can't reach its default replication factor of 3.
+        .with_env_var("KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR", "1")
+        .with_env_var("KAFKA_TRANSACTION_STATE_LOG_MIN_ISR", "1");
+    let kafka_version = Kafka::default().tag().to_string();
 
     let kafka_node = kafka_container
         .start()

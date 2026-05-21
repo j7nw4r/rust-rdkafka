@@ -67,20 +67,19 @@ async fn test_metadata() {
         .unwrap();
     let orig_broker_id = metadata.orig_broker_id();
     // The orig_broker_id may be -1 if librdkafka's bootstrap "broker" handles
-    // the request.
-    if orig_broker_id != -1 && orig_broker_id != 0 {
+    // the request. The testcontainers Kafka image assigns BROKER_ID=1.
+    if orig_broker_id != -1 && orig_broker_id != BROKER_ID {
         panic!(
-            "metadata.orig_broker_id = {}, not 0 or 1 as expected",
-            orig_broker_id
+            "metadata.orig_broker_id = {}, not -1 or {} as expected",
+            orig_broker_id, BROKER_ID
         )
     }
     assert!(!metadata.orig_broker_name().is_empty());
 
     let broker_metadata = metadata.brokers();
     assert_eq!(broker_metadata.len(), 1);
-    assert_eq!(broker_metadata[0].id(), 0);
+    assert_eq!(broker_metadata[0].id(), BROKER_ID);
     assert!(!broker_metadata[0].host().is_empty());
-    assert_eq!(broker_metadata[0].port(), 9092);
 
     let topic_metadata = metadata
         .topics()
@@ -101,11 +100,11 @@ async fn test_metadata() {
     assert_eq!(ids, vec![0, 1, 2]);
     assert_eq!(topic_metadata.error(), None);
     assert_eq!(topic_metadata.partitions().len(), 3);
-    assert_eq!(topic_metadata.partitions()[0].leader(), 0);
-    assert_eq!(topic_metadata.partitions()[1].leader(), 0);
-    assert_eq!(topic_metadata.partitions()[2].leader(), 0);
-    assert_eq!(topic_metadata.partitions()[0].replicas(), &[0]);
-    assert_eq!(topic_metadata.partitions()[0].isr(), &[0]);
+    assert_eq!(topic_metadata.partitions()[0].leader(), BROKER_ID);
+    assert_eq!(topic_metadata.partitions()[1].leader(), BROKER_ID);
+    assert_eq!(topic_metadata.partitions()[2].leader(), BROKER_ID);
+    assert_eq!(topic_metadata.partitions()[0].replicas(), &[BROKER_ID]);
+    assert_eq!(topic_metadata.partitions()[0].isr(), &[BROKER_ID]);
 
     let metadata_one_topic = consumer
         .fetch_metadata(Some(&topic_name), Duration::from_secs(5))

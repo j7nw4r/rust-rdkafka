@@ -75,7 +75,7 @@ pub async fn test_delete_unknown_group() {
     let res = admin_client
         .delete_groups(&[&unknown_group_name], &AdminOptions::default())
         .await;
-    let expected: GroupResult = Err((unknown_group_name, RDKafkaErrorCode::NotCoordinator));
+    let expected: GroupResult = Err((unknown_group_name, RDKafkaErrorCode::GroupIdNotFound));
     assert_eq!(res, Ok(vec![expected]));
 }
 
