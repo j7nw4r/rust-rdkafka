@@ -210,15 +210,15 @@ async fn test_base_producer_timeout() {
     init_test_logger();
 
     let context = CollectingContext::new();
-    let kafka_context = KafkaContext::shared()
-        .await
-        .expect("could not create kafka context");
-    // Send to a topic that does not exist; messages cannot be routed within
-    // the 100ms timeout and should be reported as MessageTimedOut.
+    // Point the producer at an unreachable broker so messages cannot be
+    // delivered within message.timeout.ms and the delivery callback is
+    // invoked with MessageTimedOut. Using a real broker is unreliable here
+    // because Kafka's default auto.create.topics.enable racing with a 100ms
+    // timeout has produced flaky results on faster CI hardware.
     let topic_name = rand_test_topic("test_base_producer_timeout");
 
     let producer = base_producer_utils::create_base_producer_with_context(
-        &kafka_context.bootstrap_servers,
+        "127.0.0.1:1",
         context.clone(),
         &[("message.timeout.ms", "100")],
     )
