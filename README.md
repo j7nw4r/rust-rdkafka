@@ -139,6 +139,7 @@ Here are some of the projects using rust-rdkafka:
 - [kafka-benchmark]: a high performance benchmarking tool for Kafka.
 - [callysto]: Stream processing framework in Rust.
 - [bytewax]: Python stream processing framework using Timely Dataflow.
+- [kafka-mock-gen] easy to use mock data producer allowing stress broker
 
 *If you are using rust-rdkafka, please let us know!*
 
@@ -157,6 +158,7 @@ your executable. To compile librdkafka you'll need:
 * the GNU toolchain
 * GNU `make`
 * `pthreads`
+* `libcurl-dev`: e.g. `libcurl4-openssl-dev` on ubuntu
 * `zlib`: optional, but included by default (feature: `libz`)
 * `cmake`: optional, *not* included by default (feature: `cmake-build`)
 * `libssl-dev`: optional, *not* included by default (feature: `ssl`)
@@ -272,6 +274,7 @@ logging framework.
 [rdkafka-sys-known-issues]: https://github.com/fede1024/rust-rdkafka/tree/master/rdkafka-sys/README.md#known-issues
 [smol]: https://docs.rs/smol
 [Tokio]: https://tokio.rs/
+[kafka-mock-gen]: https://github.com/tomaszkubacki/kafka-mock-gen
 
 ## rdkafka-sys
 
