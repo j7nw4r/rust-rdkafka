@@ -77,11 +77,10 @@ pub async fn send_record(
     producer: &BaseProducer,
     record: BaseRecord<'_, [u8; 4], str>,
 ) -> anyhow::Result<()> {
-    let send_result = producer.send(record);
-    if send_result.is_err() {
-        bail!("could not produce record: {:?}", send_result.unwrap_err());
+    if let Err(err) = producer.send(record) {
+        bail!("could not produce record: {:?}", err);
     }
-    if poll_and_flush(&producer).is_err() {
+    if poll_and_flush(producer).is_err() {
         bail!("could not poll and flush base producer")
     };
 

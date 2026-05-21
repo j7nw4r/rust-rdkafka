@@ -30,12 +30,8 @@ pub async fn test_basic_produce() {
             admin_client_result.unwrap_err()
         );
     };
-    let create_topic_result = create_topic(&admin_client, &test_topic_name).await;
-    if create_topic_result.is_err() {
-        panic!(
-            "could not create topic: {}",
-            create_topic_result.unwrap_err()
-        );
+    if let Err(err) = create_topic(&admin_client, &test_topic_name).await {
+        panic!("could not create topic: {}", err);
     }
 
     let consumer_result =
@@ -59,10 +55,10 @@ pub async fn test_basic_produce() {
     let record = BaseRecord::to(&test_topic_name) // destination topic
         .key(&[1, 2, 3, 4]) // message key
         .payload("content"); // message payload
-    let send_record_result =
-        crate::utils::producer::base_producer::send_record(&base_producer, record).await;
-    if send_record_result.is_err() {
-        panic!("could not send record: {}", send_record_result.unwrap_err());
+    if let Err(err) =
+        crate::utils::producer::base_producer::send_record(&base_producer, record).await
+    {
+        panic!("could not send record: {}", err);
     }
 
     let messages_result = poll_x_times_for_messages(&consumer, 10).await;
@@ -72,7 +68,7 @@ pub async fn test_basic_produce() {
     if messages.len() != 1 {
         panic!("expected exactly one message");
     }
-    let borrowed_next_message = messages.get(0).unwrap();
+    let borrowed_next_message = messages.first().unwrap();
 
     let owned_next_message = borrowed_next_message.detach();
     let Some(message_payload) = owned_next_message.payload() else {
