@@ -623,6 +623,75 @@ async fn test_custom_partitioner_base_producer() {
     }
 }
 
+// `statistics.interval.ms=100` directs librdkafka to invoke
+// `ClientContext::stats` every 100ms. This test runs a send loop for ~400ms
+// against a real broker, asserts the callback fired at least twice, and (via
+// the `Statistics` struct that the binding already deserialises into) that
+// each delivered struct carries non-empty top-level metadata. A binding
+// regression that swallowed the stats callback or deserialised the JSON into
+// a partial / default struct would fail one of those assertions.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_base_producer_statistics_callback_invoked() {
+    init_test_logger();
+
+    let kafka_context = KafkaContext::shared()
+        .await
+        .expect("could not create kafka context");
+    let topic_name = rand_test_topic("test_base_producer_statistics_callback_invoked");
+    let admin_client = admin::create_admin_client(&kafka_context.bootstrap_servers)
+        .await
+        .expect("could not create admin client");
+    admin_client
+        .create_topics(
+            &admin::new_topic_vec(&topic_name, Some(1)),
+            &AdminOptions::default(),
+        )
+        .await
+        .expect("could not create topic");
+
+    let context = CollectingContext::new();
+    let producer = base_producer_utils::create_base_producer_with_context(
+        &kafka_context.bootstrap_servers,
+        context.clone(),
+        &[("statistics.interval.ms", "100")],
+    )
+    .expect("failed to create base producer");
+
+    let start = std::time::Instant::now();
+    while start.elapsed() < Duration::from_millis(400) {
+        producer
+            .send(
+                BaseRecord::with_opaque_to(&topic_name, 0usize)
+                    .payload("p")
+                    .key("k"),
+            )
+            .expect("send failed");
+        producer.poll(Duration::from_millis(50));
+    }
+    producer
+        .flush(Duration::from_secs(10))
+        .expect("flush failed");
+
+    let stats = context.stats.lock().unwrap();
+    assert!(
+        stats.len() >= 2,
+        "expected at least two stats callbacks over 400ms with interval 100ms, got {}",
+        stats.len()
+    );
+    for snapshot in stats.iter() {
+        assert!(
+            !snapshot.name.is_empty(),
+            "Statistics.name should be populated: {:?}",
+            snapshot
+        );
+        assert_eq!(
+            snapshot.client_type, "producer",
+            "Statistics.client_type should report producer: {:?}",
+            snapshot.client_type
+        );
+    }
+}
+
 // Asserts the synchronous contract of `Producer::flush`: when `flush(timeout)`
 // returns successfully, every previously-queued record has reached its
 // delivery callback and the in-flight counter is zero. A binding regression
