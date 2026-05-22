@@ -1,8 +1,11 @@
+use std::time::{Duration, Instant};
+
 use crate::utils::consumer;
 use crate::utils::containers::KafkaContext;
 use crate::utils::logging::init_test_logger;
 use crate::utils::rand::{rand_test_group, rand_test_topic};
 use rdkafka::admin::{AdminOptions, GroupResult, NewTopic, TopicReplication};
+use rdkafka::consumer::Consumer;
 use rdkafka_sys::RDKafkaErrorCode;
 
 mod utils;
@@ -92,6 +95,104 @@ pub async fn test_delete_unknown_group() {
         ),
         "unexpected error code: {:?}",
         code
+    );
+}
+
+// `delete_groups` cannot remove a group while it still has an active member.
+// This test subscribes a consumer to a topic, drives it until it has actually
+// joined the group, calls `delete_groups`, and asserts the per-group result
+// is `NonEmptyGroup`. It then drops the consumer (which sends LeaveGroup),
+// retries `delete_groups`, and asserts the second call succeeds. A binding
+// regression that misclassified the per-group error or that lost the
+// active-membership signal in the second-call retry would fail one of those
+// assertions.
+#[tokio::test]
+pub async fn test_delete_non_empty_consumer_group() {
+    init_test_logger();
+
+    let kafka_context = KafkaContext::shared()
+        .await
+        .expect("could not create kafka context");
+
+    let admin_client = utils::admin::create_admin_client(&kafka_context.bootstrap_servers)
+        .await
+        .expect("could not create admin client");
+
+    let group_name = rand_test_group();
+    let topic_name = rand_test_topic("test_delete_non_empty_group");
+
+    admin_client
+        .create_topics(
+            &[NewTopic {
+                name: &topic_name,
+                num_partitions: 1,
+                replication: TopicReplication::Fixed(1),
+                config: vec![],
+            }],
+            &AdminOptions::default(),
+        )
+        .await
+        .expect("topic creation failed");
+
+    let consumer_client = utils::consumer::create_subscribed_base_consumer(
+        &kafka_context.bootstrap_servers,
+        Some(&group_name),
+        &topic_name,
+    )
+    .await
+    .expect("could not create subscribed consumer");
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        consumer_client.poll(Duration::from_millis(200));
+        if consumer_client.assignment().unwrap().count() > 0 {
+            break;
+        }
+        if Instant::now() > deadline {
+            panic!("consumer never joined the group");
+        }
+    }
+
+    let res = admin_client
+        .delete_groups(&[&group_name], &AdminOptions::default())
+        .await
+        .expect("delete_groups call should not itself fail");
+    let first: &GroupResult = res.first().expect("expected one result");
+    let (returned_name, code) = first
+        .as_ref()
+        .expect_err("delete_groups on a non-empty group should be an error");
+    assert_eq!(returned_name, &group_name);
+    assert_eq!(
+        *code,
+        RDKafkaErrorCode::NonEmptyGroup,
+        "expected NonEmptyGroup while the consumer is still active, got {:?}",
+        code
+    );
+
+    drop(consumer_client);
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let last_err: RDKafkaErrorCode = loop {
+        let res = admin_client
+            .delete_groups(&[&group_name], &AdminOptions::default())
+            .await
+            .expect("delete_groups call should not itself fail");
+        match res.first().expect("expected one result") {
+            Ok(name) => {
+                assert_eq!(name, &group_name);
+                return;
+            }
+            Err((_, code)) => {
+                if Instant::now() > deadline {
+                    break *code;
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    };
+    panic!(
+        "delete_groups never converged to success after consumer drop (last error: {:?})",
+        last_err
     );
 }
 
