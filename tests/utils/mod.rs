@@ -9,27 +9,19 @@ pub mod rand;
 pub mod topics;
 
 use std::collections::HashMap;
-use std::env::{self};
-use std::time::Duration;
 
 use regex::Regex;
 
 use crate::utils::containers::KafkaContext;
-use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
 use rdkafka::client::ClientContext;
 use rdkafka::config::ClientConfig;
 use rdkafka::consumer::ConsumerContext;
 use rdkafka::error::KafkaResult;
-use rdkafka::message::ToBytes;
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::statistics::Statistics;
 use rdkafka::TopicPartitionList;
 
 pub const BROKER_ID: i32 = 1;
-
-pub fn get_bootstrap_server() -> String {
-    env::var("KAFKA_HOST").unwrap_or_else(|_| "localhost:9092".to_owned())
-}
 
 pub fn get_broker_version(kafka_context: &KafkaContext) -> KafkaVersion {
     let regex = Regex::new(r"^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:\.(\d+))?$").unwrap();
@@ -49,85 +41,6 @@ pub fn get_broker_version(kafka_context: &KafkaContext) -> KafkaVersion {
 
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct KafkaVersion(pub u32, pub u32, pub u32, pub u32);
-
-pub struct ProducerTestContext {
-    _some_data: i64, // Add some data so that valgrind can check proper allocation
-}
-
-impl ClientContext for ProducerTestContext {
-    fn stats(&self, _: Statistics) {} // Don't print stats
-}
-
-pub async fn create_topic(name: &str, partitions: i32) {
-    let client: AdminClient<_> = consumer_config("create_topic", None).create().unwrap();
-    client
-        .create_topics(
-            &[NewTopic::new(name, partitions, TopicReplication::Fixed(1))],
-            &AdminOptions::new(),
-        )
-        .await
-        .unwrap();
-}
-
-/// Produce the specified count of messages to the topic and partition specified. A map
-/// of (partition, offset) -> message id will be returned. It panics if any error is encountered
-/// while populating the topic.
-pub async fn populate_topic<P, K, J, Q>(
-    topic_name: &str,
-    count: i32,
-    value_fn: &P,
-    key_fn: &K,
-    partition: Option<i32>,
-    timestamp: Option<i64>,
-) -> HashMap<(i32, i64), i32>
-where
-    P: Fn(i32) -> J,
-    K: Fn(i32) -> Q,
-    J: ToBytes,
-    Q: ToBytes,
-{
-    let prod_context = ProducerTestContext { _some_data: 1234 };
-
-    // Produce some messages
-    let producer = &ClientConfig::new()
-        .set("bootstrap.servers", get_bootstrap_server().as_str())
-        .set("statistics.interval.ms", "500")
-        .set("debug", "all")
-        .set("message.timeout.ms", "30000")
-        .create_with_context::<ProducerTestContext, FutureProducer<_>>(prod_context)
-        .expect("Producer creation error");
-
-    let futures = (0..count)
-        .map(|id| {
-            let future = async move {
-                producer
-                    .send(
-                        FutureRecord {
-                            topic: topic_name,
-                            payload: Some(&value_fn(id)),
-                            key: Some(&key_fn(id)),
-                            partition,
-                            timestamp,
-                            headers: None,
-                        },
-                        Duration::from_secs(1),
-                    )
-                    .await
-            };
-            (id, future)
-        })
-        .collect::<Vec<_>>();
-
-    let mut message_map = HashMap::new();
-    for (id, future) in futures {
-        match future.await {
-            Ok(delivered) => message_map.insert((delivered.partition, delivered.offset), id),
-            Err((kafka_error, _message)) => panic!("Delivery failed: {}", kafka_error),
-        };
-    }
-
-    message_map
-}
 
 pub async fn produce_messages_with_timestamp(
     producer: &FutureProducer,
@@ -225,6 +138,7 @@ impl ConsumerContext for ConsumerTestContext {
 }
 
 pub fn consumer_config(
+    bootstrap_servers: &str,
     group_id: &str,
     config_overrides: Option<HashMap<&str, &str>>,
 ) -> ClientConfig {
@@ -232,7 +146,7 @@ pub fn consumer_config(
 
     config.set("group.id", group_id);
     config.set("client.id", "rdkafka_integration_test_client");
-    config.set("bootstrap.servers", get_bootstrap_server().as_str());
+    config.set("bootstrap.servers", bootstrap_servers);
     config.set("enable.partition.eof", "false");
     config.set("session.timeout.ms", "6000");
     config.set("enable.auto.commit", "false");

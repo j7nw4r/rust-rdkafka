@@ -28,7 +28,14 @@ mod utils;
 
 #[tokio::test]
 async fn test_invalid_max_poll_interval() {
+    init_test_logger();
+
+    let kafka_context = KafkaContext::shared()
+        .await
+        .expect("could not create kafka context");
+
     let res: Result<StreamConsumer, _> = consumer_config(
+        &kafka_context.bootstrap_servers,
         &crate::utils::rand::rand_test_group(),
         Some(hashmap! { "max.poll.interval.ms" => "-1" }),
     )
@@ -75,7 +82,6 @@ async fn test_produce_consume_base() {
     )
     .await
     .expect("Could not populate topic using Future producer");
-    // let message_map = populate_topic(&topic_name, 100, &value_fn, &key_fn, None, None).await;
     let consumer = utils::consumer::stream_consumer::create_stream_consumer(
         &kafka_context.bootstrap_servers,
         Some(&rand_test_group()),
@@ -135,7 +141,6 @@ async fn test_produce_consume_base_concurrent() {
     )
     .await
     .expect("Could not populate topic using Future producer");
-    // let message_map = populate_topic(&topic_name, 100, &value_fn, &key_fn, None, None).await;
     let consumer = Arc::new(
         consumer::stream_consumer::create_stream_consumer(
             &kafka_context.bootstrap_servers,
