@@ -667,6 +667,50 @@ async fn test_event_errors() {
     );
 }
 
+// `test_incorrect_replication_factors_are_ignored_when_creating_topics`
+// exercises the client-side validation for a `TopicReplication::Variable`
+// mismatch. This test covers the broker-side path: it asks for
+// `TopicReplication::Fixed(3)` against the single-broker container, expects
+// the broker to reject the request, and pins the surfaced error to
+// `RDKafkaErrorCode::InvalidReplicationFactor`. A binding regression that
+// swallowed the per-topic error (returning `Ok` from `create_topics`) or
+// remapped the code would fail one of those assertions.
+#[tokio::test]
+async fn test_create_topics_fixed_replication_too_high() {
+    init_test_logger();
+
+    let kafka_context = KafkaContext::shared()
+        .await
+        .expect("could not create kafka context");
+
+    let admin_client = utils::admin::create_admin_client(&kafka_context.bootstrap_servers)
+        .await
+        .expect("could not create admin client");
+    let opts = AdminOptions::new().operation_timeout(Some(Duration::from_secs(30)));
+
+    let topic_name = rand_test_topic("test_create_topics_fixed_replication_too_high");
+    let topic = NewTopic::new(&topic_name, 1, TopicReplication::Fixed(3));
+    let results = admin_client
+        .create_topics(&[topic], &opts)
+        .await
+        .expect("create_topics request itself should succeed");
+    assert_eq!(results.len(), 1);
+    match &results[0] {
+        Err((name, code)) => {
+            assert_eq!(name, &topic_name);
+            assert_eq!(
+                *code,
+                RDKafkaErrorCode::InvalidReplicationFactor,
+                "expected InvalidReplicationFactor, got {:?}",
+                code
+            );
+        }
+        Ok(_) => panic!(
+            "create_topics unexpectedly succeeded for replication-factor=3 on a single broker"
+        ),
+    }
+}
+
 // `test_configs` covers broker-scoped alter_configs; this test covers the
 // topic-scoped path. It creates a fresh topic, alters `retention.ms` via
 // `alter_configs` on a `ResourceSpecifier::Topic`, then issues
