@@ -311,6 +311,117 @@ async fn test_transaction_commit() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+// `test_transaction_abort` and `test_transaction_commit` each cover a single
+// producer running a single transaction, but they never interleave committed
+// and aborted records on the same topic-partition. This test mixes the two:
+// one transactional producer commits 7 records, a second transactional
+// producer (different `transactional.id`) aborts 5 records on the same topic.
+// A `read_committed` consumer must observe exactly the 7 committed payloads
+// (the broker writes a control marker that the consumer-side filter must
+// honour); a `read_uncommitted` consumer must observe all 12 payloads. A
+// binding regression on the `isolation.level` plumbing, or a librdkafka
+// filter break, would show up as the wrong total or the wrong payload set.
+#[tokio::test]
+async fn test_transaction_isolation_level_filters_aborted() -> Result<(), Box<dyn Error>> {
+    init_test_logger();
+
+    let kafka_context = KafkaContext::shared()
+        .await
+        .expect("could not create kafka context");
+    let topic = rand_test_topic("test_txn_isolation_filter");
+    let admin_client = admin::create_admin_client(&kafka_context.bootstrap_servers)
+        .await
+        .expect("could not create admin client");
+    admin_client
+        .create_topics(
+            &admin::new_topic_vec(&topic, Some(1)),
+            &AdminOptions::default(),
+        )
+        .await
+        .expect("could not create topic");
+
+    let committed_producer = create_producer(&kafka_context)?;
+    committed_producer.init_transactions(Timeout::Never)?;
+    committed_producer.begin_transaction()?;
+    let committed_payloads: Vec<String> = (0..7).map(|i| format!("committed-{}", i)).collect();
+    for payload in &committed_payloads {
+        committed_producer
+            .send(
+                BaseRecord::to(&topic)
+                    .payload(payload.as_str())
+                    .key("k")
+                    .partition(0),
+            )
+            .map_err(|(e, _)| e)?;
+    }
+    committed_producer.flush(Duration::from_secs(20))?;
+    committed_producer.commit_transaction(Duration::from_secs(20))?;
+
+    let aborted_producer = create_producer(&kafka_context)?;
+    aborted_producer.init_transactions(Timeout::Never)?;
+    aborted_producer.begin_transaction()?;
+    let aborted_payloads: Vec<String> = (0..5).map(|i| format!("aborted-{}", i)).collect();
+    for payload in &aborted_payloads {
+        aborted_producer
+            .send(
+                BaseRecord::to(&topic)
+                    .payload(payload.as_str())
+                    .key("k")
+                    .partition(0),
+            )
+            .map_err(|(e, _)| e)?;
+    }
+    aborted_producer.flush(Duration::from_secs(20))?;
+    aborted_producer.abort_transaction(Duration::from_secs(20))?;
+
+    let collect_payloads = |iso: IsolationLevel| {
+        let iso_str = match iso {
+            IsolationLevel::ReadCommitted => "read_committed",
+            IsolationLevel::ReadUncommitted => "read_uncommitted",
+        };
+        let kafka_context = kafka_context.clone();
+        let topic = topic.clone();
+        async move {
+            let consumer = create_consumer(
+                &kafka_context,
+                Some(&[
+                    ("isolation.level", iso_str),
+                    ("enable.partition.eof", "true"),
+                ]),
+            )
+            .await?;
+            let mut tpl = TopicPartitionList::new();
+            tpl.add_partition(&topic, 0);
+            consumer.assign(&tpl)?;
+            let mut payloads = Vec::new();
+            for message in consumer.iter() {
+                match message {
+                    Ok(m) => payloads.push(m.payload_view::<str>().unwrap().unwrap().to_string()),
+                    Err(KafkaError::PartitionEOF(_)) => break,
+                    Err(e) => return Err(e),
+                }
+            }
+            Ok::<_, KafkaError>(payloads)
+        }
+    };
+
+    let committed_view = collect_payloads(IsolationLevel::ReadCommitted).await?;
+    assert_eq!(
+        committed_view, committed_payloads,
+        "read_committed should see only the committed payloads in order"
+    );
+
+    let uncommitted_view = collect_payloads(IsolationLevel::ReadUncommitted).await?;
+    let mut expected_uncommitted = committed_payloads.clone();
+    expected_uncommitted.extend(aborted_payloads.iter().cloned());
+    assert_eq!(
+        uncommitted_view, expected_uncommitted,
+        "read_uncommitted should see committed payloads followed by aborted payloads"
+    );
+
+    Ok(())
+}
+
 // `test_transaction_commit` already calls `send_offsets_to_transaction`, but
 // it produces a fixed "A" payload regardless of what was consumed and only
 // looks at offsets at the end. This test does a full consume-transform-produce
