@@ -11,7 +11,7 @@ use rdkafka_sys::RDKafkaErrorCode;
 use tokio::time::{self, Duration};
 
 use rdkafka::admin::AdminOptions;
-use rdkafka::consumer::{CommitMode, Consumer, StreamConsumer};
+use rdkafka::consumer::{CommitMode, Consumer, RebalanceProtocol, StreamConsumer};
 use rdkafka::error::KafkaError;
 use rdkafka::message::{Header, Headers, OwnedHeaders};
 use rdkafka::producer::FutureRecord;
@@ -935,6 +935,86 @@ async fn test_consume_partition_order() {
         drop(consumer);
         worker.await.unwrap();
     }
+}
+
+// `test_produce_consume_base_incremental_assign_and_unassign` exercises the
+// `incremental_assign`/`incremental_unassign` API on a manually-assigned
+// consumer (no group join, so `rebalance_protocol` stays `None`). This test
+// joins a group with `partition.assignment.strategy=cooperative-sticky`, drives
+// the consumer until the initial assignment lands, and asserts that
+// `rebalance_protocol()` reports `Cooperative`. A binding regression in the
+// `rebalance_protocol` accessor (or that ignored the cooperative-sticky
+// configuration) would fail this check.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_consumer_cooperative_sticky_rebalance_protocol() {
+    init_test_logger();
+
+    let kafka_context = KafkaContext::shared()
+        .await
+        .expect("could not create kafka context");
+    let topic_name = rand_test_topic("test_consumer_cooperative_sticky");
+    let admin_client = admin::create_admin_client(&kafka_context.bootstrap_servers)
+        .await
+        .expect("could not create admin client");
+    admin_client
+        .create_topics(
+            &admin::new_topic_vec(&topic_name, Some(2)),
+            &AdminOptions::default(),
+        )
+        .await
+        .expect("could not create topic");
+
+    let producer = producer::future_producer::create_producer(&kafka_context.bootstrap_servers)
+        .await
+        .expect("could not create future producer");
+    for partition in 0..2 {
+        producer
+            .send(
+                FutureRecord::to(&topic_name)
+                    .partition(partition)
+                    .key("k")
+                    .payload("p"),
+                Duration::from_secs(10),
+            )
+            .await
+            .unwrap_or_else(|(e, _)| panic!("delivery failed: {}", e));
+    }
+
+    let consumer = utils::consumer::stream_consumer::create_stream_consumer_with_options(
+        &kafka_context.bootstrap_servers,
+        &rand_test_group(),
+        &[("partition.assignment.strategy", "cooperative-sticky")],
+    )
+    .await
+    .expect("could not create stream consumer");
+    consumer.subscribe(&[topic_name.as_str()]).unwrap();
+
+    assert!(
+        matches!(consumer.rebalance_protocol(), RebalanceProtocol::None),
+        "rebalance_protocol should be None before the first group join",
+    );
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while std::time::Instant::now() < deadline {
+        let _ = time::timeout(Duration::from_secs(2), consumer.stream().next()).await;
+        if consumer.assignment().unwrap().count() == 2 {
+            break;
+        }
+    }
+    let assignment = consumer.assignment().unwrap();
+    assert_eq!(
+        assignment.count(),
+        2,
+        "consumer should have been assigned both partitions, got {:?}",
+        assignment
+    );
+    assert!(
+        matches!(
+            consumer.rebalance_protocol(),
+            RebalanceProtocol::Cooperative
+        ),
+        "rebalance_protocol should report Cooperative after a cooperative-sticky join",
+    );
 }
 
 // librdkafka treats subscription strings beginning with `^` as a regex
