@@ -9,7 +9,7 @@ use rdkafka::admin::AdminOptions;
 use rdkafka::config::ClientConfig;
 use rdkafka::config::RDKafkaLogLevel;
 use rdkafka::consumer::{BaseConsumer, CommitMode, Consumer};
-use rdkafka::error::KafkaError;
+use rdkafka::error::{KafkaError, RDKafkaErrorCode};
 use rdkafka::message::Message;
 use rdkafka::producer::{BaseProducer, BaseRecord, Producer};
 use rdkafka::topic_partition_list::{Offset, TopicPartitionList};
@@ -307,6 +307,89 @@ async fn test_transaction_commit() -> Result<(), Box<dyn Error>> {
             .offset(),
         Offset::Offset(20)
     );
+
+    Ok(())
+}
+
+fn create_producer_with_txn_id(
+    kafka_context: &KafkaContext,
+    transactional_id: &str,
+) -> Result<BaseProducer, KafkaError> {
+    let mut config = ClientConfig::new();
+    config
+        .set("bootstrap.servers", &kafka_context.bootstrap_servers)
+        .set("message.timeout.ms", "5000")
+        .set("enable.idempotence", "true")
+        .set("transactional.id", transactional_id);
+    config.create()
+}
+
+// When two producers share a `transactional.id`, the broker fences the older
+// epoch on the second producer's `init_transactions`. The fenced producer's
+// next transactional API call must surface that fact rather than silently
+// committing. This test sets up two producers with the same transactional
+// id, drives the second through `init_transactions` (which fences the
+// first), and asserts the first's `commit_transaction` returns a
+// `KafkaError::Transaction` whose underlying code is one of the librdkafka
+// fencing codes. A binding regression that hid the fencing error or
+// pretended the commit succeeded would surface here.
+#[tokio::test]
+async fn test_transaction_producer_fenced_by_epoch() -> Result<(), Box<dyn Error>> {
+    init_test_logger();
+
+    let kafka_context = KafkaContext::shared()
+        .await
+        .expect("could not create kafka context");
+    let topic = rand_test_topic("test_txn_fencing");
+    let admin_client = admin::create_admin_client(&kafka_context.bootstrap_servers)
+        .await
+        .expect("could not create admin client");
+    admin_client
+        .create_topics(
+            &admin::new_topic_vec(&topic, Some(1)),
+            &AdminOptions::default(),
+        )
+        .await
+        .expect("could not create topic");
+
+    let txn_id = rand_test_transactional_id();
+
+    let first = create_producer_with_txn_id(&kafka_context, &txn_id)?;
+    first.init_transactions(Timeout::Never)?;
+    first.begin_transaction()?;
+    first
+        .send(
+            BaseRecord::to(&topic)
+                .payload("first-pre-fence")
+                .key("k")
+                .partition(0),
+        )
+        .map_err(|(e, _)| e)?;
+    first.flush(Duration::from_secs(20))?;
+
+    let second = create_producer_with_txn_id(&kafka_context, &txn_id)?;
+    second.init_transactions(Timeout::Never)?;
+    drop(second);
+
+    let result = first.commit_transaction(Duration::from_secs(20));
+    match result {
+        Ok(()) => panic!("commit_transaction unexpectedly succeeded after the producer was fenced"),
+        Err(KafkaError::Transaction(rd_err)) => {
+            let code = rd_err.code();
+            assert!(
+                matches!(
+                    code,
+                    RDKafkaErrorCode::Fenced
+                        | RDKafkaErrorCode::InvalidProducerEpoch
+                        | RDKafkaErrorCode::ProducerFenced
+                ),
+                "expected a producer-fencing error code, got {:?} ({})",
+                code,
+                rd_err.string(),
+            );
+        }
+        Err(other) => panic!("unexpected error variant: {:?}", other),
+    }
 
     Ok(())
 }
