@@ -623,6 +623,77 @@ async fn test_custom_partitioner_base_producer() {
     }
 }
 
+// Asserts the synchronous contract of `Producer::flush`: when `flush(timeout)`
+// returns successfully, every previously-queued record has reached its
+// delivery callback and the in-flight counter is zero. A binding regression
+// that returned early from `flush` (or surfaced the wrong in-flight value)
+// would let a caller drop the producer while messages were still buffered.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_base_producer_flush_drains_inflight() {
+    init_test_logger();
+
+    let kafka_context = KafkaContext::shared()
+        .await
+        .expect("could not create kafka context");
+    let topic_name = rand_test_topic("test_base_producer_flush_drains_inflight");
+    let admin_client = admin::create_admin_client(&kafka_context.bootstrap_servers)
+        .await
+        .expect("could not create admin client");
+    admin_client
+        .create_topics(
+            &admin::new_topic_vec(&topic_name, Some(1)),
+            &AdminOptions::default(),
+        )
+        .await
+        .expect("could not create topic");
+
+    let context = CollectingContext::new();
+    // `linger.ms=100` buffers records for up to 100ms before sending, so the
+    // in-flight count is non-zero immediately after the loop and `flush` has
+    // real work to drain.
+    let producer = base_producer_utils::create_base_producer_with_context(
+        &kafka_context.bootstrap_servers,
+        context.clone(),
+        &[("linger.ms", "100")],
+    )
+    .expect("failed to create base producer");
+
+    const N: usize = 200;
+    for id in 0..N {
+        producer
+            .send(
+                BaseRecord::with_opaque_to(&topic_name, id)
+                    .payload("payload")
+                    .key("key"),
+            )
+            .expect("send failed");
+    }
+    assert!(
+        producer.in_flight_count() > 0,
+        "expected non-zero in-flight count after queuing {} records, got 0",
+        N
+    );
+
+    producer
+        .flush(Duration::from_secs(20))
+        .expect("flush returned an error");
+
+    assert_eq!(
+        producer.in_flight_count(),
+        0,
+        "in-flight count must be zero after a successful flush",
+    );
+    let delivered = context.results.lock().unwrap();
+    assert_eq!(
+        delivered.len(),
+        N,
+        "every queued record should have hit the delivery callback by the time flush returns",
+    );
+    for (_, error, _) in delivered.iter() {
+        assert!(error.is_none(), "unexpected delivery error: {:?}", error);
+    }
+}
+
 // librdkafka rejects payloads larger than `message.max.bytes` synchronously
 // inside `rd_kafka_produce`, surfacing
 // `MessageProduction(RDKafkaErrorCode::MessageSizeTooLarge)` from
