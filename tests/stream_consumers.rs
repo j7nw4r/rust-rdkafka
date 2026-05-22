@@ -13,6 +13,8 @@ use tokio::time::{self, Duration};
 use rdkafka::admin::AdminOptions;
 use rdkafka::consumer::{CommitMode, Consumer, StreamConsumer};
 use rdkafka::error::KafkaError;
+use rdkafka::message::{Header, Headers, OwnedHeaders};
+use rdkafka::producer::FutureRecord;
 use rdkafka::topic_partition_list::{Offset, TopicPartitionList};
 use rdkafka::util::current_time_millis;
 use rdkafka::{Message, Timestamp};
@@ -933,4 +935,134 @@ async fn test_consume_partition_order() {
         drop(consumer);
         worker.await.unwrap();
     }
+}
+
+// `test_base_producer_headers` already covers the produce side via the
+// delivery callback. This test covers the consume side: produce a message
+// with a mixed set of headers (str-valued, byte-valued, empty, and explicitly
+// null), consume it through a StreamConsumer, and verify
+// `BorrowedMessage::headers` exposes each header in order with the correct
+// key, value type, and value bytes. A binding regression in the headers
+// FFI conversion path would surface here.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_consumer_reads_message_headers() {
+    init_test_logger();
+
+    let kafka_context = KafkaContext::shared()
+        .await
+        .expect("could not create kafka context");
+    let topic_name = rand_test_topic("test_consumer_reads_message_headers");
+    let admin_client = admin::create_admin_client(&kafka_context.bootstrap_servers)
+        .await
+        .expect("could not create admin client");
+    admin_client
+        .create_topics(
+            &admin::new_topic_vec(&topic_name, Some(1)),
+            &AdminOptions::default(),
+        )
+        .await
+        .expect("could not create topic");
+
+    let producer = producer::future_producer::create_producer(&kafka_context.bootstrap_servers)
+        .await
+        .expect("could not create future producer");
+
+    let headers = OwnedHeaders::new()
+        .insert(Header {
+            key: "h-bytes",
+            value: Some(&[0u8, 1, 2, 3][..]),
+        })
+        .insert(Header {
+            key: "h-str",
+            value: Some("v-str"),
+        })
+        .insert(Header {
+            key: "h-empty",
+            value: Some(&[][..]),
+        })
+        .insert::<Vec<u8>>(Header {
+            key: "h-null",
+            value: None,
+        });
+
+    producer
+        .send(
+            FutureRecord::to(&topic_name)
+                .partition(0)
+                .key("k")
+                .payload("p")
+                .headers(headers),
+            Duration::from_secs(10),
+        )
+        .await
+        .unwrap_or_else(|(e, _)| panic!("delivery failed: {}", e));
+
+    let consumer = utils::consumer::stream_consumer::create_stream_consumer(
+        &kafka_context.bootstrap_servers,
+        Some(&rand_test_group()),
+    )
+    .await
+    .expect("could not create stream consumer");
+    consumer.subscribe(&[topic_name.as_str()]).unwrap();
+
+    let message = time::timeout(Duration::from_secs(15), consumer.stream().next())
+        .await
+        .expect("timed out waiting for consumed message")
+        .expect("stream ended unexpectedly")
+        .expect("error receiving message");
+
+    let received = message
+        .headers()
+        .expect("consumed message should expose headers");
+    assert_eq!(received.count(), 4);
+    assert_eq!(
+        received.get(0),
+        Header {
+            key: "h-bytes",
+            value: Some(&[0u8, 1, 2, 3][..]),
+        }
+    );
+    assert_eq!(
+        received.get_as::<str>(1),
+        Ok(Header {
+            key: "h-str",
+            value: Some("v-str"),
+        })
+    );
+    assert_eq!(
+        received.get_as::<[u8]>(2),
+        Ok(Header {
+            key: "h-empty",
+            value: Some(&[][..]),
+        })
+    );
+    assert_eq!(
+        received.get_as::<[u8]>(3),
+        Ok(Header {
+            key: "h-null",
+            value: None,
+        })
+    );
+    let collected: Vec<_> = received.iter().collect();
+    assert_eq!(
+        collected,
+        vec![
+            Header {
+                key: "h-bytes",
+                value: Some(&[0u8, 1, 2, 3][..]),
+            },
+            Header {
+                key: "h-str",
+                value: Some(b"v-str" as &[u8]),
+            },
+            Header {
+                key: "h-empty",
+                value: Some(&[][..]),
+            },
+            Header {
+                key: "h-null",
+                value: None,
+            },
+        ],
+    );
 }
