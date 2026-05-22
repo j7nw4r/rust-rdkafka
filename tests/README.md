@@ -292,9 +292,17 @@ failure you didn't introduce.
   3. They won't fail with a clear error; they'll just sit there until
   the timeout.
 
+- **`tests/base_consumer.rs::test_produce_consume_message_queue_nonempty_callback`**
+  asserts wakeup-count deltas against a baseline captured after initial
+  setup, not absolute counts. apache/kafka 3.7.x posts an event to the
+  split partition queue during the initial position query (the partition
+  is assigned at `Offset::Beginning`), which fires the nonempty callback
+  once before any messages are produced. 3.8+ doesn't. Comparing deltas
+  is portable across the matrix.
+
 ## CI
 
-`.github/workflows/ci.yml` runs four jobs:
+`.github/workflows/ci.yml` runs five jobs:
 
 - **lint**: `cargo fmt --check`, `cargo clippy -- -Dwarnings`,
   `cargo clippy --tests -- -Dwarnings`, `cargo test --doc`. Lint
@@ -309,6 +317,12 @@ failure you didn't introduce.
   `apache/kafka:<tag>` via `resolve_kafka_image_tag` and runs
   `cargo test`. Rows run sequentially (`max-parallel: 1`) because they
   share an Actions runner and each spawns its own Docker container.
+- **runtime-examples**: smoke-tests `examples/runtime_smol.rs` and
+  `examples/runtime_async_std.rs` against a pinned `apache/kafka:4.0.2`
+  service container. The integration suite covers the tokio path via
+  testcontainers; this job catches breakage in the alternative runtimes
+  that `cargo build --all-targets` would miss. Not matrixed: it's a
+  runtime-correctness check, not a broker-compatibility check.
 
 ## Troubleshooting
 
