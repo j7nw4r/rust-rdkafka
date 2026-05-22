@@ -937,6 +937,104 @@ async fn test_consume_partition_order() {
     }
 }
 
+// librdkafka treats subscription strings beginning with `^` as a regex
+// pattern and resolves them against the broker's topic metadata on every
+// metadata refresh. This test creates two topics that match a unique
+// `^<rand>.*` pattern and one topic that does not, subscribes the consumer
+// to the regex, drives the consumer until its assignment stabilizes, and
+// asserts only the matching topics are present. A binding regression that
+// passed the subscription string through unmodified (so `^` was lost) or
+// that crossed up topic ownership would fail the topic-set comparison.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_consumer_regex_subscription_matches_only_prefixed() {
+    init_test_logger();
+
+    let kafka_context = KafkaContext::shared()
+        .await
+        .expect("could not create kafka context");
+    let prefix = rand_test_topic("regex_match");
+    let match1 = format!("{}_a", prefix);
+    let match2 = format!("{}_b", prefix);
+    let nonmatch = format!("other_{}", prefix);
+
+    let admin_client = admin::create_admin_client(&kafka_context.bootstrap_servers)
+        .await
+        .expect("could not create admin client");
+    for topic in [&match1, &match2, &nonmatch] {
+        admin_client
+            .create_topics(
+                &admin::new_topic_vec(topic, Some(1)),
+                &AdminOptions::default(),
+            )
+            .await
+            .expect("could not create topic");
+    }
+
+    let producer = producer::future_producer::create_producer(&kafka_context.bootstrap_servers)
+        .await
+        .expect("could not create future producer");
+    for topic in [&match1, &match2, &nonmatch] {
+        producer
+            .send(
+                FutureRecord::to(topic.as_str())
+                    .partition(0)
+                    .key("k")
+                    .payload("p"),
+                Duration::from_secs(10),
+            )
+            .await
+            .unwrap_or_else(|(e, _)| panic!("delivery failed: {}", e));
+    }
+
+    let consumer = utils::consumer::stream_consumer::create_stream_consumer(
+        &kafka_context.bootstrap_servers,
+        Some(&rand_test_group()),
+    )
+    .await
+    .expect("could not create stream consumer");
+    let pattern = format!("^{}.*", prefix);
+    consumer.subscribe(&[pattern.as_str()]).unwrap();
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    let expected: std::collections::HashSet<String> =
+        [match1.clone(), match2.clone()].into_iter().collect();
+    let mut observed: std::collections::HashSet<String> = std::collections::HashSet::new();
+    while std::time::Instant::now() < deadline {
+        match time::timeout(Duration::from_secs(2), consumer.stream().next()).await {
+            Ok(Some(Ok(m))) => {
+                observed.insert(m.topic().to_string());
+            }
+            Ok(Some(Err(e))) => panic!("stream error: {:?}", e),
+            Ok(None) => panic!("stream ended"),
+            Err(_) => {}
+        }
+        let assignment = consumer.assignment().unwrap();
+        let assigned: std::collections::HashSet<String> = assignment
+            .elements()
+            .iter()
+            .map(|e| e.topic().to_string())
+            .collect();
+        if assigned == expected {
+            break;
+        }
+    }
+    let assignment = consumer.assignment().unwrap();
+    let assigned: std::collections::HashSet<String> = assignment
+        .elements()
+        .iter()
+        .map(|e| e.topic().to_string())
+        .collect();
+    assert_eq!(
+        assigned, expected,
+        "regex subscription should converge to the two matching topics",
+    );
+    assert!(
+        !observed.contains(&nonmatch),
+        "non-matching topic {} should not be delivered",
+        nonmatch
+    );
+}
+
 // `test_produce_consume_with_timestamp` already calls `offsets_for_timestamp`,
 // but only with two distinct timestamp values. This test produces a strictly
 // monotonic sequence of distinct timestamps and queries at a midpoint, then
