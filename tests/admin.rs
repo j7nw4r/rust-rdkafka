@@ -666,3 +666,72 @@ async fn test_event_errors() {
         Err(KafkaError::AdminOp(RDKafkaErrorCode::OperationTimedOut))
     );
 }
+
+// `test_configs` covers broker-scoped alter_configs; this test covers the
+// topic-scoped path. It creates a fresh topic, alters `retention.ms` via
+// `alter_configs` on a `ResourceSpecifier::Topic`, then issues
+// `describe_configs` and asserts the entry value updated to the new number
+// and its `source` switched to `ConfigSource::DynamicTopic`. A binding
+// regression that misrouted the topic-scoped AlterConfigs request to a
+// broker handler, or that misclassified the readback source, would fail
+// here.
+#[tokio::test]
+async fn test_alter_topic_configs_retention_ms_dynamic_topic() {
+    init_test_logger();
+
+    let kafka_context = KafkaContext::shared()
+        .await
+        .expect("could not create kafka context");
+
+    let admin_client = utils::admin::create_admin_client(&kafka_context.bootstrap_servers)
+        .await
+        .expect("could not create admin client");
+    let opts = AdminOptions::new().operation_timeout(Some(Duration::from_secs(30)));
+
+    let topic_name = rand_test_topic("test_alter_topic_retention");
+    let create_results = admin_client
+        .create_topics(&utils::admin::new_topic_vec(&topic_name, Some(1)), &opts)
+        .await
+        .expect("could not create topic");
+    assert_eq!(create_results, vec![Ok(topic_name.clone())]);
+
+    let resource = ResourceSpecifier::Topic(&topic_name);
+    let new_value = "604800000";
+    let config = AlterConfig::new(resource).set("retention.ms", new_value);
+    let alter_results = admin_client
+        .alter_configs(&[config], &opts)
+        .await
+        .expect("alter configs failed");
+    assert_eq!(
+        alter_results,
+        vec![Ok(OwnedResourceSpecifier::Topic(topic_name.clone()))]
+    );
+
+    let mut tries = 0;
+    loop {
+        let describe_results = admin_client
+            .describe_configs(&[resource], &opts)
+            .await
+            .expect("describe configs failed");
+        let cfg = describe_results[0]
+            .as_ref()
+            .expect("describe configs returned an error");
+        let entry = cfg.get("retention.ms").expect("retention.ms entry missing");
+        let expected = ConfigEntry {
+            name: "retention.ms".into(),
+            value: Some(new_value.into()),
+            source: ConfigSource::DynamicTopic,
+            is_read_only: false,
+            is_default: false,
+            is_sensitive: false,
+        };
+        if entry == &expected {
+            break;
+        } else if tries >= 5 {
+            panic!("retention.ms did not converge: got {:?}", entry);
+        } else {
+            tries += 1;
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    }
+}
