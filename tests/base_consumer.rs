@@ -521,9 +521,15 @@ async fn test_produce_consume_message_queue_nonempty_callback() {
     // Initiate connection.
     assert!(consumer.poll(Duration::from_secs(0)).is_none());
 
-    // Expect no wakeups for 1s.
+    // Let any startup events drain through. apache/kafka 3.7.x posts an
+    // event to the split partition queue during initial position setup
+    // (the partition is assigned at Offset::Beginning, so librdkafka has
+    // to query the log start offset), which invokes the nonempty
+    // callback once before any messages exist. 3.8+ doesn't show this.
+    // Capture the post-setup wakeup count as our baseline and assert
+    // deltas from here on.
     thread::sleep(Duration::from_secs(1));
-    assert_eq!(wakeups.load(Ordering::SeqCst), 0);
+    let baseline = wakeups.load(Ordering::SeqCst);
 
     // Verify there are no messages waiting.
     assert!(consumer.poll(Duration::from_secs(0)).is_none());
@@ -534,7 +540,7 @@ async fn test_produce_consume_message_queue_nonempty_callback() {
         .await
         .expect("Could not create Future producer");
     produce_messages(&producer, &topic_name, 2, None, None).await;
-    wait_for_wakeups(1);
+    wait_for_wakeups(baseline + 1);
 
     // Read one of the messages.
     assert!(queue.poll(Duration::from_secs(0)).is_some());
@@ -543,7 +549,7 @@ async fn test_produce_consume_message_queue_nonempty_callback() {
     // queue is not fully drained, for 1s.
     produce_messages(&producer, &topic_name, 2, None, None).await;
     thread::sleep(Duration::from_secs(1));
-    assert_eq!(wakeups.load(Ordering::SeqCst), 1);
+    assert_eq!(wakeups.load(Ordering::SeqCst), baseline + 1);
 
     // Drain the queue.
     assert!(queue.poll(None).is_some());
@@ -552,15 +558,15 @@ async fn test_produce_consume_message_queue_nonempty_callback() {
 
     // Expect no additional wakeups for 1s.
     thread::sleep(Duration::from_secs(1));
-    assert_eq!(wakeups.load(Ordering::SeqCst), 1);
+    assert_eq!(wakeups.load(Ordering::SeqCst), baseline + 1);
 
     // Add another message, and expect a wakeup.
     produce_messages(&producer, &topic_name, 1, None, None).await;
-    wait_for_wakeups(2);
+    wait_for_wakeups(baseline + 2);
 
     // Expect no additional wakeups for 1s.
     thread::sleep(Duration::from_secs(1));
-    assert_eq!(wakeups.load(Ordering::SeqCst), 2);
+    assert_eq!(wakeups.load(Ordering::SeqCst), baseline + 2);
 
     // Disable the queue and add another message.
     queue.set_nonempty_callback(|| ());
@@ -568,7 +574,7 @@ async fn test_produce_consume_message_queue_nonempty_callback() {
 
     // Expect no additional wakeups for 1s.
     thread::sleep(Duration::from_secs(1));
-    assert_eq!(wakeups.load(Ordering::SeqCst), 2);
+    assert_eq!(wakeups.load(Ordering::SeqCst), baseline + 2);
 }
 
 //TODO: adjust the test to work, today set_nonempty_callback param is never called.
