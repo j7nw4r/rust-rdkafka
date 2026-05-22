@@ -937,6 +937,109 @@ async fn test_consume_partition_order() {
     }
 }
 
+// `test_produce_consume_with_timestamp` already calls `offsets_for_timestamp`,
+// but only with two distinct timestamp values. This test produces a strictly
+// monotonic sequence of distinct timestamps and queries at a midpoint, then
+// verifies the returned offset is the first message at-or-after the query
+// timestamp. A binding regression in `offsets_for_times` (or its `tpl`
+// serialization) that returned the nearest neighbour, or the first ever
+// offset, would fail this assertion.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_consumer_offsets_for_times_first_at_or_after() {
+    init_test_logger();
+
+    let kafka_context = KafkaContext::shared()
+        .await
+        .expect("could not create kafka context");
+    let topic_name = rand_test_topic("test_consumer_offsets_for_times_first_at_or_after");
+    let admin_client = admin::create_admin_client(&kafka_context.bootstrap_servers)
+        .await
+        .expect("could not create admin client");
+    admin_client
+        .create_topics(
+            &admin::new_topic_vec(&topic_name, Some(1)),
+            &AdminOptions::default(),
+        )
+        .await
+        .expect("could not create topic");
+
+    let producer = producer::future_producer::create_producer(&kafka_context.bootstrap_servers)
+        .await
+        .expect("could not create future producer");
+
+    const N: i64 = 20;
+    const BASE_TS: i64 = 1_700_000_000_000;
+    const STEP: i64 = 100;
+    for i in 0..N {
+        let ts = BASE_TS + i * STEP;
+        let payload = format!("ts-{}", ts);
+        producer
+            .send(
+                FutureRecord::to(&topic_name)
+                    .partition(0)
+                    .key("k")
+                    .payload(&payload)
+                    .timestamp(ts),
+                Duration::from_secs(10),
+            )
+            .await
+            .unwrap_or_else(|(e, _)| panic!("delivery failed: {}", e));
+    }
+
+    let consumer = utils::consumer::stream_consumer::create_stream_consumer(
+        &kafka_context.bootstrap_servers,
+        Some(&rand_test_group()),
+    )
+    .await
+    .expect("could not create stream consumer");
+    let mut tpl = TopicPartitionList::new();
+    tpl.add_partition_offset(&topic_name, 0, Offset::Beginning)
+        .unwrap();
+    consumer.assign(&tpl).unwrap();
+
+    let exact_query_ts = BASE_TS + 7 * STEP;
+    let exact_tpl = consumer
+        .offsets_for_timestamp(exact_query_ts, Duration::from_secs(10))
+        .expect("offsets_for_timestamp failed for exact timestamp");
+    let exact_offset = exact_tpl
+        .find_partition(&topic_name, 0)
+        .expect("missing partition entry")
+        .offset();
+    assert_eq!(
+        exact_offset,
+        Offset::Offset(7),
+        "exact-timestamp query should return the matching offset",
+    );
+
+    let midpoint_query_ts = BASE_TS + 7 * STEP + STEP / 2;
+    let midpoint_tpl = consumer
+        .offsets_for_timestamp(midpoint_query_ts, Duration::from_secs(10))
+        .expect("offsets_for_timestamp failed for midpoint timestamp");
+    let midpoint_offset = midpoint_tpl
+        .find_partition(&topic_name, 0)
+        .expect("missing partition entry")
+        .offset();
+    assert_eq!(
+        midpoint_offset,
+        Offset::Offset(8),
+        "midpoint-timestamp query should return the first offset at-or-after the query",
+    );
+
+    let after_query_ts = BASE_TS + (N + 10) * STEP;
+    let after_tpl = consumer
+        .offsets_for_timestamp(after_query_ts, Duration::from_secs(10))
+        .expect("offsets_for_timestamp failed for after-end timestamp");
+    let after_offset = after_tpl
+        .find_partition(&topic_name, 0)
+        .expect("missing partition entry")
+        .offset();
+    assert_eq!(
+        after_offset,
+        Offset::End,
+        "timestamp past the high watermark should return Offset::End",
+    );
+}
+
 // `test_base_producer_headers` already covers the produce side via the
 // delivery callback. This test covers the consume side: produce a message
 // with a mixed set of headers (str-valued, byte-valued, empty, and explicitly
