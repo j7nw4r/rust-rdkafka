@@ -302,6 +302,131 @@ async fn test_future_producer_compression_zstd() {
     run_compression_round_trip("zstd").await;
 }
 
+// Enables the idempotent producer and produces in two batches separated by a
+// flush, so the second batch starts after the first has fully drained. If the
+// PID/epoch tracking that librdkafka enables under `enable.idempotence=true`
+// (acks=all, retries, in-flight bound, sequence numbers) regresses in the
+// binding, the consumer side will see duplicate or missing offsets / payloads.
+//
+// A true "forced reconnect midway" requires either a proxy or a privileged
+// in-process disconnect; both are out of scope for the testcontainer setup,
+// and aggressive `connections.max.idle.ms` produces MessageTimedOut errors
+// rather than testing idempotence. The flush boundary is a cheap stand-in
+// that exercises the producer's recovery from a fully-drained pipeline.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_future_producer_idempotence() {
+    init_test_logger();
+
+    let kafka_context = KafkaContext::shared()
+        .await
+        .expect("could not create kafka context");
+    let topic_name = rand_test_topic("test_future_producer_idempotence");
+    let admin_client = admin::create_admin_client(&kafka_context.bootstrap_servers)
+        .await
+        .expect("could not create admin client");
+    admin_client
+        .create_topics(
+            &admin::new_topic_vec(&topic_name, Some(1)),
+            &AdminOptions::default(),
+        )
+        .await
+        .expect("could not create topic");
+
+    let producer = producer::future_producer::create_producer_with_overrides(
+        &kafka_context.bootstrap_servers,
+        &[
+            ("enable.idempotence", "true"),
+            ("message.timeout.ms", "30000"),
+        ],
+    )
+    .await
+    .expect("could not create idempotent future producer");
+
+    const N: usize = 1000;
+    const HALF: usize = N / 2;
+    let payloads: Vec<String> = (0..N).map(|i| format!("idempotent-{:04}", i)).collect();
+
+    let mut delivery_futures = Vec::with_capacity(HALF);
+    for payload in &payloads[..HALF] {
+        delivery_futures.push(
+            producer.send(
+                FutureRecord::<(), str>::to(&topic_name)
+                    .partition(0)
+                    .payload(payload),
+                Duration::from_secs(30),
+            ),
+        );
+    }
+    for (i, fut) in delivery_futures.into_iter().enumerate() {
+        fut.await
+            .unwrap_or_else(|(e, _)| panic!("first-half delivery {} failed: {}", i, e));
+    }
+
+    producer
+        .flush(Timeout::After(Duration::from_secs(30)))
+        .unwrap();
+
+    let mut delivery_futures = Vec::with_capacity(N - HALF);
+    for payload in &payloads[HALF..] {
+        delivery_futures.push(
+            producer.send(
+                FutureRecord::<(), str>::to(&topic_name)
+                    .partition(0)
+                    .payload(payload),
+                Duration::from_secs(30),
+            ),
+        );
+    }
+    for (i, fut) in delivery_futures.into_iter().enumerate() {
+        fut.await
+            .unwrap_or_else(|(e, _)| panic!("second-half delivery {} failed: {}", i, e));
+    }
+    producer
+        .flush(Timeout::After(Duration::from_secs(30)))
+        .unwrap();
+
+    let consumer = utils::consumer::stream_consumer::create_stream_consumer(
+        &kafka_context.bootstrap_servers,
+        Some(&rand_test_group()),
+    )
+    .await
+    .expect("could not create stream consumer");
+    consumer.subscribe(&[topic_name.as_str()]).unwrap();
+
+    let mut seen_offsets = std::collections::BTreeSet::new();
+    let mut seen_payloads = std::collections::HashSet::new();
+    consumer
+        .stream()
+        .take(N)
+        .for_each(|message| {
+            let m = message.expect("error receiving message");
+            assert!(
+                seen_offsets.insert(m.offset()),
+                "duplicate offset {} delivered",
+                m.offset()
+            );
+            let payload = m.payload_view::<str>().unwrap().unwrap().to_string();
+            assert!(
+                seen_payloads.insert(payload.clone()),
+                "duplicate payload {} delivered",
+                payload
+            );
+            future::ready(())
+        })
+        .await;
+    assert_eq!(seen_offsets.len(), N);
+    assert_eq!(*seen_offsets.iter().next().unwrap(), 0);
+    assert_eq!(*seen_offsets.iter().next_back().unwrap(), (N as i64) - 1);
+    assert_eq!(seen_payloads.len(), N);
+    for payload in &payloads {
+        assert!(
+            seen_payloads.contains(payload),
+            "missing payload {}",
+            payload
+        );
+    }
+}
+
 #[tokio::test]
 async fn test_future_undelivered() {
     let delivery_future = {
