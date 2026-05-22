@@ -427,6 +427,72 @@ async fn test_future_producer_idempotence() {
     }
 }
 
+// librdkafka's default `consistent_random` partitioner hashes keyed records
+// to a partition with CRC32. A binding regression that drops or rewrites the
+// key on the way into librdkafka would cause the same key to map to
+// different partitions across sends; this test produces 16 copies of each
+// key across 4 keys and asserts every copy of each key landed on exactly one
+// partition.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_future_producer_default_partitioner_is_deterministic() {
+    init_test_logger();
+
+    let kafka_context = KafkaContext::shared()
+        .await
+        .expect("could not create kafka context");
+    let topic_name = rand_test_topic("test_future_producer_default_partitioner");
+    let admin_client = admin::create_admin_client(&kafka_context.bootstrap_servers)
+        .await
+        .expect("could not create admin client");
+    admin_client
+        .create_topics(
+            &admin::new_topic_vec(&topic_name, Some(6)),
+            &AdminOptions::default(),
+        )
+        .await
+        .expect("could not create topic");
+
+    let producer = producer::future_producer::create_producer(&kafka_context.bootstrap_servers)
+        .await
+        .expect("could not create future producer");
+
+    let keys = ["alpha", "beta", "gamma", "delta"];
+    const COPIES: usize = 16;
+
+    let mut per_key: std::collections::HashMap<&str, std::collections::HashSet<i32>> =
+        std::collections::HashMap::new();
+    for (k_idx, key) in keys.iter().enumerate() {
+        for c in 0..COPIES {
+            let payload = format!("payload-{}-{}", k_idx, c);
+            let delivered = producer
+                .send(
+                    FutureRecord::to(&topic_name).key(*key).payload(&payload),
+                    Duration::from_secs(10),
+                )
+                .await
+                .unwrap_or_else(|(e, _)| panic!("delivery failed for key {}: {}", key, e));
+            per_key.entry(*key).or_default().insert(delivered.partition);
+        }
+    }
+
+    for key in keys {
+        let partitions = per_key.get(key).expect("missing deliveries for key");
+        assert_eq!(
+            partitions.len(),
+            1,
+            "key {} mapped to multiple partitions: {:?}",
+            key,
+            partitions
+        );
+    }
+    let chosen: std::collections::HashSet<i32> = per_key.values().flatten().copied().collect();
+    assert!(
+        chosen.len() >= 2,
+        "with four keys over six partitions we should see at least two distinct partitions, got {:?}",
+        chosen
+    );
+}
+
 #[tokio::test]
 async fn test_future_undelivered() {
     let delivery_future = {
