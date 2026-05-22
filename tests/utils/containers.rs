@@ -4,7 +4,7 @@ use std::sync::Arc;
 use testcontainers_modules::kafka::apache::Kafka;
 use testcontainers_modules::testcontainers::core::ContainerPort;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
-use testcontainers_modules::testcontainers::{ContainerAsync, Image, ImageExt};
+use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt};
 use tokio::sync::OnceCell;
 
 type KafkaImage = testcontainers_modules::testcontainers::core::ContainerRequest<Kafka>;
@@ -52,13 +52,17 @@ impl KafkaContext {
 }
 
 async fn init() -> anyhow::Result<Arc<KafkaContext>> {
+    let kafka_tag = resolve_kafka_image_tag();
     let kafka_container: KafkaImage = Kafka::default()
+        // The kafka-native image (the crate default) doesn't publish 3.7.x
+        // tags, so use the JVM image which covers the full CI matrix range.
+        .with_jvm_image()
+        .with_tag(&kafka_tag)
         // The single-broker testcontainers image needs replication and ISR
         // overrides; otherwise transactions hang because __transaction_state
         // can't reach its default replication factor of 3.
         .with_env_var("KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR", "1")
         .with_env_var("KAFKA_TRANSACTION_STATE_LOG_MIN_ISR", "1");
-    let kafka_version = Kafka::default().tag().to_string();
 
     let kafka_node = kafka_container
         .start()
@@ -75,8 +79,23 @@ async fn init() -> anyhow::Result<Arc<KafkaContext>> {
     Ok::<Arc<KafkaContext>, anyhow::Error>(Arc::new(KafkaContext {
         kafka_node,
         bootstrap_servers: format!("{}:{}", kafka_host, kafka_port),
-        version: kafka_version,
+        version: kafka_tag,
     }))
+}
+
+// Map the CI matrix's short KAFKA_VERSION (e.g. "3.7") onto a specific
+// apache/kafka tag so each matrix row actually exercises a different broker.
+// Without this, the crate's hard-coded default tag would make every row run
+// the same image. Full tag strings (e.g. "3.9.1") are passed through.
+fn resolve_kafka_image_tag() -> String {
+    let raw = std::env::var("KAFKA_VERSION").unwrap_or_else(|_| "4.0".into());
+    match raw.as_str() {
+        "3.7" => "3.7.2".into(),
+        "3.8" => "3.8.1".into(),
+        "3.9" => "3.9.2".into(),
+        "4.0" => "4.0.2".into(),
+        _ => raw,
+    }
 }
 
 #[tokio::test]
