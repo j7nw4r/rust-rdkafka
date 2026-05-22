@@ -623,6 +623,77 @@ async fn test_custom_partitioner_base_producer() {
     }
 }
 
+// librdkafka rejects payloads larger than `message.max.bytes` synchronously
+// inside `rd_kafka_produce`, surfacing
+// `MessageProduction(RDKafkaErrorCode::MessageSizeTooLarge)` from
+// `BaseProducer::send`. A binding regression that swallows or remaps that
+// error would cause the producer to hang on the eventual flush or silently
+// drop the message; this test asserts the synchronous error shape so that
+// regression is loud.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_base_producer_message_too_large() {
+    init_test_logger();
+
+    let kafka_context = KafkaContext::shared()
+        .await
+        .expect("could not create kafka context");
+    let topic_name = rand_test_topic("test_base_producer_message_too_large");
+    let admin_client = admin::create_admin_client(&kafka_context.bootstrap_servers)
+        .await
+        .expect("could not create admin client");
+    admin_client
+        .create_topics(
+            &admin::new_topic_vec(&topic_name, Some(1)),
+            &AdminOptions::default(),
+        )
+        .await
+        .expect("could not create topic");
+
+    let context = CollectingContext::new();
+    let producer = base_producer_utils::create_base_producer_with_context(
+        &kafka_context.bootstrap_servers,
+        context.clone(),
+        &[("message.max.bytes", "1024")],
+    )
+    .expect("failed to create base producer");
+
+    let oversized = vec![b'x'; 4096];
+    let result = producer.send(
+        BaseRecord::with_opaque_to(&topic_name, 0usize)
+            .payload(&oversized)
+            .key("k"),
+    );
+
+    match result {
+        Err((KafkaError::MessageProduction(RDKafkaErrorCode::MessageSizeTooLarge), _record)) => {}
+        Err((other, _)) => panic!("unexpected error variant: {:?}", other),
+        Ok(()) => panic!("send unexpectedly succeeded for an oversized payload"),
+    }
+
+    let small_record = BaseRecord::with_opaque_to(&topic_name, 1usize)
+        .payload(b"ok" as &[u8])
+        .key("k");
+    producer
+        .send(small_record)
+        .expect("baseline small send should succeed");
+    producer.flush(Duration::from_secs(10)).unwrap();
+
+    let delivered: Vec<_> = context
+        .results
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(_, err, id)| (err.clone(), *id))
+        .collect();
+    assert_eq!(
+        delivered.len(),
+        1,
+        "only the baseline small payload should reach the delivery callback: {:?}",
+        delivered
+    );
+    assert_eq!(delivered[0], (None, 1));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_custom_partitioner_threaded_producer() {
     init_test_logger();
