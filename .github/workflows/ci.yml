@@ -71,7 +71,8 @@ jobs:
   test:
     strategy:
       fail-fast: false
-      # The test suite doesn't support concurrent runs.
+      # Each row spins up its own Docker container via testcontainers, so
+      # keep them sequential to avoid contention on a single runner.
       max-parallel: 1
       matrix:
         include:
@@ -88,8 +89,8 @@ jobs:
           toolchain: ${{ env.rust_version }}
       - run: sudo apt-get update
       - run: sudo apt-get install -y libcurl4-openssl-dev
-      # - run: sudo apt-get install -qy valgrind  # Valgrind currently disabled in testing
-      - run: ./test_suite.sh
+      - run: cargo test
         env:
           KAFKA_VERSION: ${{ matrix.kafka-version }}
-          TERM: xterm-256color
+          RUST_LOG: off
+          RUST_BACKTRACE: 1

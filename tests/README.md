@@ -306,15 +306,9 @@ failure you didn't introduce.
   constraints actually resolve.
 - **test**: the integration suite. Fans out across `KAFKA_VERSION =
   3.7, 3.8, 3.9, 4.0`. Each row resolves to a specific
-  `apache/kafka:<tag>` via `resolve_kafka_image_tag`. Rows run
-  sequentially (`max-parallel: 1`) because they share an Actions runner
-  and each spawns its own Docker container.
-
-The test job currently runs through `test_suite.sh`, which still has a
-leftover `docker compose up --wait` from the previous setup. The
-docker-compose broker is no longer used by any test; removing it from
-the script and inlining the rest of the script into `ci.yml` is a
-straightforward follow-up.
+  `apache/kafka:<tag>` via `resolve_kafka_image_tag` and runs
+  `cargo test`. Rows run sequentially (`max-parallel: 1`) because they
+  share an Actions runner and each spawns its own Docker container.
 
 ## Troubleshooting
 
@@ -332,9 +326,10 @@ that the `KAFKA_TRANSACTION_STATE_LOG_*` env vars are still set in
 `containers.rs::init`.
 
 **Port 9092 in use.** Doesn't matter to testcontainers (it allocates a
-random host port), but a stale docker-compose broker from before this
-suite can confuse things if you also run examples that hardcode
-`localhost:9092`. `docker compose down` clears it.
+random host port), but examples under `examples/` default to
+`localhost:9092`. If you're running an example against a separate
+broker you started by hand, make sure nothing else is bound to that
+port.
 
 **A test passes locally but fails in CI on Kafka 3.7.** The broker is a
 different version. Run the same matrix locally: `KAFKA_VERSION=3.7
