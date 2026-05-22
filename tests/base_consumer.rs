@@ -3,12 +3,13 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use rdkafka::admin::AdminOptions;
-use rdkafka::consumer::{BaseConsumer, Consumer, ConsumerContext};
+use rdkafka::client::ClientContext;
+use rdkafka::consumer::{BaseConsumer, Consumer, ConsumerContext, Rebalance};
 use rdkafka::error::{KafkaError, RDKafkaErrorCode};
 use rdkafka::topic_partition_list::{Offset, TopicPartitionList};
 use rdkafka::util::{current_time_millis, Timeout};
@@ -684,4 +685,205 @@ async fn test_invalid_consumer_position() {
         consumer.position(),
         Err(KafkaError::MetadataFetch(RDKafkaErrorCode::UnknownGroup))
     );
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum RebalanceEventKind {
+    Assign,
+    Revoke,
+    Error,
+}
+
+#[derive(Clone, Debug)]
+struct RebalanceEvent {
+    kind: RebalanceEventKind,
+    partitions: Vec<(String, i32)>,
+}
+
+#[derive(Clone)]
+struct RecordingRebalanceContext {
+    pre: Arc<Mutex<Vec<RebalanceEvent>>>,
+    post: Arc<Mutex<Vec<RebalanceEvent>>>,
+}
+
+impl RecordingRebalanceContext {
+    fn new() -> Self {
+        Self {
+            pre: Arc::new(Mutex::new(Vec::new())),
+            post: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    fn drain(&self) -> (Vec<RebalanceEvent>, Vec<RebalanceEvent>) {
+        let pre = self.pre.lock().unwrap().clone();
+        let post = self.post.lock().unwrap().clone();
+        (pre, post)
+    }
+}
+
+fn record_rebalance(rebalance: &Rebalance) -> RebalanceEvent {
+    match rebalance {
+        Rebalance::Assign(tpl) => RebalanceEvent {
+            kind: RebalanceEventKind::Assign,
+            partitions: tpl
+                .elements()
+                .iter()
+                .map(|e| (e.topic().to_string(), e.partition()))
+                .collect(),
+        },
+        Rebalance::Revoke(tpl) => RebalanceEvent {
+            kind: RebalanceEventKind::Revoke,
+            partitions: tpl
+                .elements()
+                .iter()
+                .map(|e| (e.topic().to_string(), e.partition()))
+                .collect(),
+        },
+        Rebalance::Error(_) => RebalanceEvent {
+            kind: RebalanceEventKind::Error,
+            partitions: Vec::new(),
+        },
+    }
+}
+
+impl ClientContext for RecordingRebalanceContext {}
+
+impl ConsumerContext for RecordingRebalanceContext {
+    fn pre_rebalance(&self, _: &BaseConsumer<Self>, rebalance: &Rebalance) {
+        self.pre.lock().unwrap().push(record_rebalance(rebalance));
+    }
+
+    fn post_rebalance(&self, _: &BaseConsumer<Self>, rebalance: &Rebalance) {
+        self.post.lock().unwrap().push(record_rebalance(rebalance));
+    }
+}
+
+fn build_recording_consumer(
+    bootstrap_servers: &str,
+    group_id: &str,
+) -> BaseConsumer<RecordingRebalanceContext> {
+    let mut config = ClientConfig::new();
+    config
+        .set("group.id", group_id)
+        .set("bootstrap.servers", bootstrap_servers)
+        .set("enable.partition.eof", "false")
+        .set("session.timeout.ms", "6000")
+        .set("enable.auto.commit", "false")
+        .set("auto.offset.reset", "earliest");
+    config
+        .create_with_context::<RecordingRebalanceContext, BaseConsumer<RecordingRebalanceContext>>(
+            RecordingRebalanceContext::new(),
+        )
+        .expect("could not create recording base consumer")
+}
+
+#[tokio::test]
+async fn test_consumer_rebalance_callbacks() {
+    init_test_logger();
+
+    let kafka_context = KafkaContext::shared()
+        .await
+        .expect("could not create kafka context");
+    let topic_name = rand_test_topic("test_consumer_rebalance_callbacks");
+    let admin_client = admin::create_admin_client(&kafka_context.bootstrap_servers)
+        .await
+        .expect("could not create admin client");
+    admin_client
+        .create_topics(
+            &admin::new_topic_vec(&topic_name, Some(2)),
+            &AdminOptions::default(),
+        )
+        .await
+        .expect("could not create topic");
+
+    let group = rand_test_group();
+
+    let consumer1 = build_recording_consumer(&kafka_context.bootstrap_servers, &group);
+    let context1 = consumer1.context().clone();
+    consumer1.subscribe(&[topic_name.as_str()]).unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        consumer1.poll(Duration::from_millis(200));
+        let assignment = consumer1.assignment().unwrap();
+        if assignment.count() == 2 {
+            break;
+        }
+        if Instant::now() > deadline {
+            panic!(
+                "consumer1 never got both partitions; assignment count {}",
+                assignment.count()
+            );
+        }
+    }
+
+    let consumer2 = build_recording_consumer(&kafka_context.bootstrap_servers, &group);
+    let context2 = consumer2.context().clone();
+    consumer2.subscribe(&[topic_name.as_str()]).unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        consumer1.poll(Duration::from_millis(200));
+        consumer2.poll(Duration::from_millis(200));
+        let a1 = consumer1.assignment().unwrap().count();
+        let a2 = consumer2.assignment().unwrap().count();
+        if a1 == 1 && a2 == 1 {
+            break;
+        }
+        if Instant::now() > deadline {
+            panic!(
+                "rebalance did not converge to one partition per consumer: c1={}, c2={}",
+                a1, a2
+            );
+        }
+    }
+
+    let (pre1, post1) = context1.drain();
+    let (pre2, post2) = context2.drain();
+
+    assert!(
+        pre1.iter().any(|e| e.kind == RebalanceEventKind::Assign),
+        "consumer1 never observed a pre-rebalance Assign event: {:?}",
+        pre1
+    );
+    assert!(
+        post1.iter().any(|e| e.kind == RebalanceEventKind::Assign),
+        "consumer1 never observed a post-rebalance Assign event: {:?}",
+        post1
+    );
+    let first_assign1 = post1
+        .iter()
+        .find(|e| e.kind == RebalanceEventKind::Assign)
+        .expect("missing initial assign on consumer1");
+    assert_eq!(
+        first_assign1.partitions.len(),
+        2,
+        "consumer1's first post-rebalance assign should hold both partitions, got {:?}",
+        first_assign1.partitions
+    );
+    for (topic, _) in &first_assign1.partitions {
+        assert_eq!(topic, &topic_name);
+    }
+    assert!(
+        post1.iter().any(|e| e.kind == RebalanceEventKind::Revoke),
+        "consumer1 never observed a post-rebalance Revoke event after consumer2 joined: {:?}",
+        post1
+    );
+
+    assert!(
+        pre2.iter().any(|e| e.kind == RebalanceEventKind::Assign),
+        "consumer2 never observed a pre-rebalance Assign event: {:?}",
+        pre2
+    );
+    let assign2 = post2
+        .iter()
+        .find(|e| e.kind == RebalanceEventKind::Assign)
+        .expect("consumer2 never observed a post-rebalance Assign event");
+    assert_eq!(
+        assign2.partitions.len(),
+        1,
+        "consumer2 should have been assigned exactly one partition, got {:?}",
+        assign2.partitions
+    );
+    assert_eq!(assign2.partitions[0].0, topic_name);
 }
