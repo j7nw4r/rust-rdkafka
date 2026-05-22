@@ -89,7 +89,12 @@ jobs:
           toolchain: ${{ env.rust_version }}
       - run: sudo apt-get update
       - run: sudo apt-get install -y libcurl4-openssl-dev
-      - run: cargo test
+      # `--features zstd` so the zstd compression round-trip test in
+      # `tests/future_producer.rs` actually links zstd. The default build
+      # passes `--disable-zstd` to librdkafka (see rdkafka-sys/build.rs),
+      # which would make a `compression.type=zstd` producer reject the
+      # config at creation.
+      - run: cargo test --features zstd
         env:
           KAFKA_VERSION: ${{ matrix.kafka-version }}
           RUST_LOG: off

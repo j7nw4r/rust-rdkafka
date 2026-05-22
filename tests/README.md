@@ -245,6 +245,7 @@ Most of what you'll need is in `tests/utils/`:
 | Get a `NewTopic` vec for finer control | `admin::new_topic_vec(name, Some(num_partitions))`           |
 | Make a `BaseProducer`            | `producer::base_producer::create_producer(bootstrap_servers).await` |
 | Make a `FutureProducer`          | `producer::future_producer::create_producer(bootstrap_servers).await` |
+| `FutureProducer` with config overrides | `producer::future_producer::create_producer_with_overrides(bootstrap_servers, &[(key, value)]).await` |
 | Make a `BaseConsumer`            | `consumer::create_subscribed_base_consumer(bootstrap_servers, group, topic).await` |
 | Make a `StreamConsumer`          | `consumer::stream_consumer::create_stream_consumer(bootstrap_servers, Some(group)).await` |
 | Produce N messages               | `produce_messages(producer, topic, n, partition, timestamp).await` (from `utils::*`) |
@@ -315,8 +316,12 @@ failure you didn't introduce.
 - **test**: the integration suite. Fans out across `KAFKA_VERSION =
   3.7, 3.8, 3.9, 4.0`. Each row resolves to a specific
   `apache/kafka:<tag>` via `resolve_kafka_image_tag` and runs
-  `cargo test`. Rows run sequentially (`max-parallel: 1`) because they
-  share an Actions runner and each spawns its own Docker container.
+  `cargo test --features zstd`. The `zstd` feature is on so the
+  compression round-trip test for zstd in `tests/future_producer.rs`
+  actually links the codec (rdkafka-sys passes `--disable-zstd` to
+  librdkafka by default). Rows run sequentially (`max-parallel: 1`)
+  because they share an Actions runner and each spawns its own Docker
+  container.
 - **runtime-examples**: smoke-tests `examples/runtime_smol.rs` and
   `examples/runtime_async_std.rs` against a pinned `apache/kafka:4.0.2`
   service container. The integration suite covers the tokio path via

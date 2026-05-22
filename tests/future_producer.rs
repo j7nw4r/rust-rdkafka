@@ -2,11 +2,13 @@
 
 use std::time::{Duration, Instant};
 
+use futures::future;
 use futures::stream::{FuturesUnordered, StreamExt};
 
 use rdkafka::admin::AdminOptions;
 use rdkafka::client::DefaultClientContext;
 use rdkafka::config::ClientConfig;
+use rdkafka::consumer::Consumer;
 use rdkafka::error::{KafkaError, RDKafkaErrorCode};
 use rdkafka::message::{Header, Headers, Message, OwnedHeaders};
 use rdkafka::producer::{FutureProducer, FutureRecord, Producer};
@@ -190,6 +192,114 @@ async fn test_future_producer_send_fail() {
             panic!("Unexpected return value: {:?}", e);
         }
     }
+}
+
+async fn run_compression_round_trip(codec: &str) {
+    init_test_logger();
+
+    let kafka_context = KafkaContext::shared()
+        .await
+        .expect("could not create kafka context");
+    let topic_name = rand_test_topic(&format!("test_compression_{}", codec));
+    let admin_client = admin::create_admin_client(&kafka_context.bootstrap_servers)
+        .await
+        .expect("could not create admin client");
+    admin_client
+        .create_topics(
+            &admin::new_topic_vec(&topic_name, Some(1)),
+            &AdminOptions::default(),
+        )
+        .await
+        .expect("could not create topic");
+
+    let producer = producer::future_producer::create_producer_with_overrides(
+        &kafka_context.bootstrap_servers,
+        &[("compression.type", codec), ("linger.ms", "20")],
+    )
+    .await
+    .expect("could not create future producer");
+
+    const N: usize = 64;
+    let payload = "rust-rdkafka compression round trip ".repeat(8);
+    let keys: Vec<String> = (0..N).map(|i| format!("k{}", i)).collect();
+    let values: Vec<String> = (0..N).map(|i| format!("{}:{}", i, payload)).collect();
+    let mut futures = Vec::with_capacity(N);
+    for i in 0..N {
+        futures.push(
+            producer.send(
+                FutureRecord::to(&topic_name)
+                    .partition(0)
+                    .key(&keys[i])
+                    .payload(&values[i]),
+                Duration::from_secs(10),
+            ),
+        );
+    }
+    let mut expected = std::collections::HashMap::with_capacity(N);
+    for (i, future) in futures.into_iter().enumerate() {
+        let delivered = future.await.unwrap_or_else(|(e, _)| {
+            panic!("delivery failed for codec {} message {}: {}", codec, i, e)
+        });
+        expected.insert(delivered.offset, (keys[i].clone(), values[i].clone()));
+    }
+    producer
+        .flush(Timeout::After(Duration::from_secs(10)))
+        .unwrap();
+
+    let consumer = utils::consumer::stream_consumer::create_stream_consumer(
+        &kafka_context.bootstrap_servers,
+        Some(&rand_test_group()),
+    )
+    .await
+    .expect("could not create stream consumer");
+    consumer.subscribe(&[topic_name.as_str()]).unwrap();
+
+    let mut seen = 0usize;
+    consumer
+        .stream()
+        .take(N)
+        .for_each(|message| {
+            let m = message.expect("error receiving message");
+            let (expected_key, expected_value) = expected
+                .remove(&m.offset())
+                .unwrap_or_else(|| panic!("unexpected offset {} for codec {}", m.offset(), codec));
+            assert_eq!(m.key_view::<str>().unwrap().unwrap(), expected_key);
+            assert_eq!(m.payload_view::<str>().unwrap().unwrap(), expected_value);
+            seen += 1;
+            future::ready(())
+        })
+        .await;
+    assert_eq!(seen, N, "codec {} did not yield all messages", codec);
+    assert!(
+        expected.is_empty(),
+        "codec {} left {} unmatched offsets",
+        codec,
+        expected.len()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_future_producer_compression_gzip() {
+    run_compression_round_trip("gzip").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_future_producer_compression_snappy() {
+    run_compression_round_trip("snappy").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_future_producer_compression_lz4() {
+    run_compression_round_trip("lz4").await;
+}
+
+// librdkafka is built with `--disable-zstd` unless the `zstd` Cargo feature is
+// enabled (see rdkafka-sys/build.rs), so this test can only run when that
+// feature is on. CI exercises it by passing `--features zstd` to the test job.
+#[cfg(feature = "zstd")]
+#[tokio::test(flavor = "multi_thread")]
+async fn test_future_producer_compression_zstd() {
+    run_compression_round_trip("zstd").await;
 }
 
 #[tokio::test]
