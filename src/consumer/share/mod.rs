@@ -29,3 +29,11 @@ mod config;
 mod consumer;
 mod context;
 mod records;
+
+pub use self::acknowledge::{
+    AcknowledgeType, AcknowledgementCommitResult, ParseAcknowledgeTypeError,
+};
+pub use self::config::{
+    AcknowledgementMode, AutoOffsetReset, IsolationLevel, ParseConfigEnumError,
+    ShareConsumerConfig,
+};
