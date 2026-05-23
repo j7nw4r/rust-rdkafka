@@ -34,8 +34,7 @@ pub use self::acknowledge::{
     AcknowledgeType, AcknowledgementCommitResult, ParseAcknowledgeTypeError,
 };
 pub use self::config::{
-    AcknowledgementMode, AutoOffsetReset, IsolationLevel, ParseConfigEnumError,
-    ShareConsumerConfig,
+    AcknowledgementMode, AutoOffsetReset, IsolationLevel, ParseConfigEnumError, ShareConsumerConfig,
 };
 pub use self::consumer::{BaseShareConsumer, ShareConsumer};
 pub use self::context::{DefaultShareConsumerContext, ShareConsumerContext};

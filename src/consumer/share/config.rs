@@ -388,12 +388,18 @@ mod tests {
     #[test]
     fn enum_parse_round_trip() {
         for mode in [AcknowledgementMode::Implicit, AcknowledgementMode::Explicit] {
-            assert_eq!(mode.to_string().parse::<AcknowledgementMode>().unwrap(), mode);
+            assert_eq!(
+                mode.to_string().parse::<AcknowledgementMode>().unwrap(),
+                mode
+            );
         }
         for reset in [AutoOffsetReset::Earliest, AutoOffsetReset::Latest] {
             assert_eq!(reset.to_string().parse::<AutoOffsetReset>().unwrap(), reset);
         }
-        for level in [IsolationLevel::ReadUncommitted, IsolationLevel::ReadCommitted] {
+        for level in [
+            IsolationLevel::ReadUncommitted,
+            IsolationLevel::ReadCommitted,
+        ] {
             assert_eq!(level.to_string().parse::<IsolationLevel>().unwrap(), level);
         }
     }

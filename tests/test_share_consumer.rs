@@ -74,38 +74,28 @@ fn config_writes_canonical_keys() {
 #[test]
 fn construction_round_trip() {
     let config = make_config();
-    let consumer =
-        BaseShareConsumer::<DefaultShareConsumerContext>::from_config(&config).unwrap();
+    let consumer = BaseShareConsumer::<DefaultShareConsumerContext>::from_config(&config).unwrap();
     assert_eq!(consumer.group_id(), "share-consumer-smoke");
 }
 
 #[test]
 fn construction_with_context() {
     let config = make_config();
-    let consumer = BaseShareConsumer::from_config_and_context(
-        &config,
-        DefaultShareConsumerContext,
-    )
-    .unwrap();
+    let consumer =
+        BaseShareConsumer::from_config_and_context(&config, DefaultShareConsumerContext).unwrap();
     assert_eq!(consumer.group_id(), "share-consumer-smoke");
 }
 
 #[test]
 fn runtime_methods_return_unsupported() {
     let config = make_config();
-    let consumer =
-        BaseShareConsumer::<DefaultShareConsumerContext>::from_config(&config).unwrap();
+    let consumer = BaseShareConsumer::<DefaultShareConsumerContext>::from_config(&config).unwrap();
 
     assert_unsupported(consumer.subscribe(&["topic-a", "topic-b"]));
     assert_unsupported(consumer.unsubscribe());
     assert_unsupported(consumer.subscription());
     assert_unsupported(consumer.poll(Duration::from_millis(10)));
-    assert_unsupported(consumer.acknowledge_offset(
-        "topic-a",
-        0,
-        42,
-        AcknowledgeType::Accept,
-    ));
+    assert_unsupported(consumer.acknowledge_offset("topic-a", 0, 42, AcknowledgeType::Accept));
     assert_unsupported(consumer.commit_sync(Duration::from_millis(10)));
     assert_unsupported(consumer.commit_async());
 }
@@ -113,8 +103,7 @@ fn runtime_methods_return_unsupported() {
 #[test]
 fn close_and_wakeup_are_safe_no_ops() {
     let config = make_config();
-    let consumer =
-        BaseShareConsumer::<DefaultShareConsumerContext>::from_config(&config).unwrap();
+    let consumer = BaseShareConsumer::<DefaultShareConsumerContext>::from_config(&config).unwrap();
     consumer.wakeup();
     consumer.close().expect("close stub returns Ok");
 }

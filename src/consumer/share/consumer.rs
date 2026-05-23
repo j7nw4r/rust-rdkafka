@@ -132,9 +132,7 @@ where
         let group_id = config
             .get("group.id")
             .ok_or_else(|| {
-                KafkaError::ClientCreation(
-                    "share consumer requires group.id to be set".to_owned(),
-                )
+                KafkaError::ClientCreation("share consumer requires group.id to be set".to_owned())
             })?
             .to_owned();
         Ok(Self {
@@ -259,19 +257,15 @@ mod tests {
 
     #[test]
     fn runtime_methods_return_unsupported() {
-        let consumer = BaseShareConsumer::<DefaultShareConsumerContext>::from_config(&make_config())
-            .expect("construction");
+        let consumer =
+            BaseShareConsumer::<DefaultShareConsumerContext>::from_config(&make_config())
+                .expect("construction");
 
         assert_unsupported(consumer.subscribe(&["topic"]));
         assert_unsupported(consumer.unsubscribe());
         assert_unsupported(consumer.subscription());
         assert_unsupported(consumer.poll(std::time::Duration::from_millis(0)));
-        assert_unsupported(consumer.acknowledge_offset(
-            "topic",
-            0,
-            42,
-            AcknowledgeType::Accept,
-        ));
+        assert_unsupported(consumer.acknowledge_offset("topic", 0, 42, AcknowledgeType::Accept));
         assert_unsupported(consumer.commit_sync(std::time::Duration::from_millis(0)));
         assert_unsupported(consumer.commit_async());
 
