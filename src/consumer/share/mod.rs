@@ -37,3 +37,6 @@ pub use self::config::{
     AcknowledgementMode, AutoOffsetReset, IsolationLevel, ParseConfigEnumError,
     ShareConsumerConfig,
 };
+pub use self::consumer::{BaseShareConsumer, ShareConsumer};
+pub use self::context::{DefaultShareConsumerContext, ShareConsumerContext};
+pub use self::records::{ShareConsumerRecords, ShareRecord};
