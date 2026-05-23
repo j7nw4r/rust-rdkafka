@@ -15,13 +15,12 @@
 //! # Runtime support
 //!
 //! librdkafka does not yet expose a public C API for share consumers.
-//! Construction of a [`BaseShareConsumer`][bsc] succeeds so downstream code
+//! Construction of a [`BaseShareConsumer`] succeeds so downstream code
 //! can exercise the type surface, but every runtime method returns
 //! [`KafkaError::Unsupported`][unsup]. Track librdkafka progress at
 //! <https://github.com/confluentinc/librdkafka/issues/5441>.
 //!
 //! [kip]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-932%3A+Queues+for+Kafka
-//! [bsc]: crate::consumer::share::BaseShareConsumer
 //! [unsup]: crate::error::KafkaError::Unsupported
 
 mod acknowledge;
