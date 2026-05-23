@@ -77,7 +77,7 @@ pub struct ShareRecord<'a> {
     _phantom: PhantomData<&'a ()>,
 }
 
-impl<'a> ShareRecord<'a> {
+impl ShareRecord<'_> {
     /// Topic of the record.
     pub fn topic(&self) -> &str {
         &self.topic
