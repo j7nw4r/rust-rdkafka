@@ -1,0 +1,1 @@
+//! Share consumer context trait.

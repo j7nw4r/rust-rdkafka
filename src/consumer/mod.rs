@@ -19,6 +19,9 @@ use crate::util::{KafkaDrop, NativePtr, Timeout};
 pub mod base_consumer;
 pub mod stream_consumer;
 
+#[cfg(feature = "kip-932")]
+pub mod share;
+
 // Re-exports.
 #[doc(inline)]
 pub use self::base_consumer::BaseConsumer;
