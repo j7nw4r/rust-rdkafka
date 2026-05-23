@@ -9,6 +9,31 @@ Reference: <https://cwiki.apache.org/confluence/display/KAFKA/KIP-932%3A+Queues+
 Upstream tracking: librdkafka issue
 <https://github.com/confluentinc/librdkafka/issues/5441>.
 
+## 0. Working mode
+
+This plan is a living document. It ships in a draft PR on the fork
+and is iterated on in-tree while we wait for librdkafka to land
+public KIP-932 C API. Expect the document to evolve as upstream
+shapes solidify; treat the latest commit on this branch (not the
+initial version) as the source of truth.
+
+Practical consequences:
+
+- The draft PR opens as soon as phase 1 lands and stays draft until
+  librdkafka's public API is available, the scaffolding is wired to
+  it, and the validation gate (section 7) passes.
+- Phases 2 through 4 (types, error variant, trait + stub) can be
+  executed against the current librdkafka pin since they introduce
+  no FFI calls.
+- Phase 5 onward (tests, CI lane, docs) may be paused or revised
+  pending the upstream API shape, to avoid churn against a moving
+  target.
+- API shapes in section 5 are provisional. When librdkafka's public
+  header lands, this document is updated first, then the code.
+- The "Risks and follow-ups" section is the working backlog;
+  add entries as we learn more rather than starting a separate
+  tracking doc.
+
 ## 1. Context and constraints
 
 - rust-rdkafka is a Rust FFI wrapper over librdkafka via `rdkafka-sys`.
