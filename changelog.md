@@ -6,6 +6,19 @@ See also the [rdkafka-sys changelog](rdkafka-sys/changelog.md).
 
 None
 
+## 0.39.0 (2026-01-25)
+
+* Fix the char zero ending in native config ([#706]).
+* Implement FromIterator for TopicPartitionList ([#795]).
+* Sanitize ClientConfig and AdminClient debugging ([#796]).
+* Handle null characters in topic in BaseProducer::send ([#782]).
+* Bump rdkafka-sys.
+
+[#706]: https://github.com/fede1024/rust-rdkafka/pull/706
+[#795]: https://github.com/fede1024/rust-rdkafka/pull/795
+[#796]: https://github.com/fede1024/rust-rdkafka/pull/796
+[#782]: https://github.com/fede1024/rust-rdkafka/pull/782
+
 ## 0.38.0 (2025-07-05)
 
 * Update `BaseProducer::poll` to not return early, and instead continue

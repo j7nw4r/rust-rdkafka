@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+use rdkafka::admin::AdminOptions;
 use rdkafka::config::ClientConfig;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::error::KafkaError;
@@ -9,52 +10,76 @@ use rdkafka::topic_partition_list::TopicPartitionList;
 
 use rdkafka_sys::types::RDKafkaConfRes;
 
+use crate::utils::admin;
+use crate::utils::containers::KafkaContext;
+use crate::utils::logging::init_test_logger;
+use crate::utils::producer;
+use crate::utils::rand::*;
 use crate::utils::*;
 
 mod utils;
 
-fn create_consumer(group_id: &str) -> StreamConsumer {
-    ClientConfig::new()
-        .set("group.id", group_id)
-        .set("enable.partition.eof", "true")
-        .set("client.id", "rdkafka_integration_test_client")
-        .set("bootstrap.servers", get_bootstrap_server().as_str())
-        .set("session.timeout.ms", "6000")
-        .set("debug", "all")
-        .set("auto.offset.reset", "earliest")
-        .create()
-        .expect("Failed to create StreamConsumer")
+async fn create_consumer(kafka_context: &KafkaContext, group_id: &str) -> StreamConsumer {
+    utils::consumer::stream_consumer::create_stream_consumer_with_options(
+        &kafka_context.bootstrap_servers,
+        group_id,
+        &[
+            ("enable.partition.eof", "true"),
+            ("client.id", "rdkafka_integration_test_client"),
+            ("session.timeout.ms", "6000"),
+            ("debug", "all"),
+        ],
+    )
+    .await
+    .expect("Failed to create StreamConsumer")
 }
 
 #[tokio::test]
 async fn test_metadata() {
-    let _r = env_logger::try_init();
+    init_test_logger();
 
+    let kafka_context = KafkaContext::shared()
+        .await
+        .expect("could not create kafka context");
     let topic_name = rand_test_topic("test_metadata");
-    populate_topic(&topic_name, 1, &value_fn, &key_fn, Some(0), None).await;
-    populate_topic(&topic_name, 1, &value_fn, &key_fn, Some(1), None).await;
-    populate_topic(&topic_name, 1, &value_fn, &key_fn, Some(2), None).await;
-    let consumer = create_consumer(&rand_test_group());
+    let admin_client = admin::create_admin_client(&kafka_context.bootstrap_servers)
+        .await
+        .expect("Could not create admin client");
+    admin_client
+        .create_topics(
+            &admin::new_topic_vec(&topic_name, Some(3)),
+            &AdminOptions::default(),
+        )
+        .await
+        .expect("could not create topic");
+
+    let producer = producer::future_producer::create_producer(&kafka_context.bootstrap_servers)
+        .await
+        .expect("Could not create Future producer");
+    produce_messages_to_partition(&producer, &topic_name, 1, 0).await;
+    produce_messages_to_partition(&producer, &topic_name, 1, 1).await;
+    produce_messages_to_partition(&producer, &topic_name, 1, 2).await;
+
+    let consumer = create_consumer(&kafka_context, &rand_test_group()).await;
 
     let metadata = consumer
         .fetch_metadata(None, Duration::from_secs(5))
         .unwrap();
     let orig_broker_id = metadata.orig_broker_id();
     // The orig_broker_id may be -1 if librdkafka's bootstrap "broker" handles
-    // the request.
-    if orig_broker_id != -1 && orig_broker_id != 0 {
+    // the request. The testcontainers Kafka image assigns BROKER_ID=1.
+    if orig_broker_id != -1 && orig_broker_id != BROKER_ID {
         panic!(
-            "metadata.orig_broker_id = {}, not 0 or 1 as expected",
-            orig_broker_id
+            "metadata.orig_broker_id = {}, not -1 or {} as expected",
+            orig_broker_id, BROKER_ID
         )
     }
     assert!(!metadata.orig_broker_name().is_empty());
 
     let broker_metadata = metadata.brokers();
     assert_eq!(broker_metadata.len(), 1);
-    assert_eq!(broker_metadata[0].id(), 0);
+    assert_eq!(broker_metadata[0].id(), BROKER_ID);
     assert!(!broker_metadata[0].host().is_empty());
-    assert_eq!(broker_metadata[0].port(), 9092);
 
     let topic_metadata = metadata
         .topics()
@@ -75,11 +100,11 @@ async fn test_metadata() {
     assert_eq!(ids, vec![0, 1, 2]);
     assert_eq!(topic_metadata.error(), None);
     assert_eq!(topic_metadata.partitions().len(), 3);
-    assert_eq!(topic_metadata.partitions()[0].leader(), 0);
-    assert_eq!(topic_metadata.partitions()[1].leader(), 0);
-    assert_eq!(topic_metadata.partitions()[2].leader(), 0);
-    assert_eq!(topic_metadata.partitions()[0].replicas(), &[0]);
-    assert_eq!(topic_metadata.partitions()[0].isr(), &[0]);
+    assert_eq!(topic_metadata.partitions()[0].leader(), BROKER_ID);
+    assert_eq!(topic_metadata.partitions()[1].leader(), BROKER_ID);
+    assert_eq!(topic_metadata.partitions()[2].leader(), BROKER_ID);
+    assert_eq!(topic_metadata.partitions()[0].replicas(), &[BROKER_ID]);
+    assert_eq!(topic_metadata.partitions()[0].isr(), &[BROKER_ID]);
 
     let metadata_one_topic = consumer
         .fetch_metadata(Some(&topic_name), Duration::from_secs(5))
@@ -89,11 +114,27 @@ async fn test_metadata() {
 
 #[tokio::test]
 async fn test_subscription() {
-    let _r = env_logger::try_init();
+    init_test_logger();
 
+    let kafka_context = KafkaContext::shared()
+        .await
+        .expect("could not create kafka context");
     let topic_name = rand_test_topic("test_subscription");
-    populate_topic(&topic_name, 10, &value_fn, &key_fn, None, None).await;
-    let consumer = create_consumer(&rand_test_group());
+    let admin_client = admin::create_admin_client(&kafka_context.bootstrap_servers)
+        .await
+        .expect("Could not create admin client");
+    admin_client
+        .create_topics(
+            &admin::new_topic_vec(&topic_name, Some(1)),
+            &AdminOptions::default(),
+        )
+        .await
+        .expect("could not create topic");
+    let producer = producer::future_producer::create_producer(&kafka_context.bootstrap_servers)
+        .await
+        .expect("Could not create Future producer");
+    produce_messages(&producer, &topic_name, 10, None, None).await;
+    let consumer = create_consumer(&kafka_context, &rand_test_group()).await;
     consumer.subscribe(&[topic_name.as_str()]).unwrap();
 
     // Make sure the consumer joins the group.
@@ -106,14 +147,32 @@ async fn test_subscription() {
 
 #[tokio::test]
 async fn test_group_membership() {
-    let _r = env_logger::try_init();
+    init_test_logger();
 
+    let kafka_context = KafkaContext::shared()
+        .await
+        .expect("could not create kafka context");
     let topic_name = rand_test_topic("test_group_membership");
     let group_name = rand_test_group();
-    populate_topic(&topic_name, 1, &value_fn, &key_fn, Some(0), None).await;
-    populate_topic(&topic_name, 1, &value_fn, &key_fn, Some(1), None).await;
-    populate_topic(&topic_name, 1, &value_fn, &key_fn, Some(2), None).await;
-    let consumer = create_consumer(&group_name);
+    let admin_client = admin::create_admin_client(&kafka_context.bootstrap_servers)
+        .await
+        .expect("Could not create admin client");
+    admin_client
+        .create_topics(
+            &admin::new_topic_vec(&topic_name, Some(3)),
+            &AdminOptions::default(),
+        )
+        .await
+        .expect("could not create topic");
+
+    let producer = producer::future_producer::create_producer(&kafka_context.bootstrap_servers)
+        .await
+        .expect("Could not create Future producer");
+    produce_messages_to_partition(&producer, &topic_name, 1, 0).await;
+    produce_messages_to_partition(&producer, &topic_name, 1, 1).await;
+    produce_messages_to_partition(&producer, &topic_name, 1, 2).await;
+
+    let consumer = create_consumer(&kafka_context, &group_name).await;
     consumer.subscribe(&[topic_name.as_str()]).unwrap();
 
     // Make sure the consumer joins the group.
