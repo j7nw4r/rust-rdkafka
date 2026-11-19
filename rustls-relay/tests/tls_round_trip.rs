@@ -1,141 +1,33 @@
 //! Round trip through a Kafka broker that has only TLS listeners.
 //!
 //! Run with `cargo test -p rustls-relay --test tls_round_trip -- --ignored --nocapture`.
-//! The test needs Docker. Set `RELAY_KAFKA_IMAGE` to change the broker image.
-//! Set `RELAY_DOCKER_NETWORK` (for example `container:<id>`) to put the broker
-//! on that network instead of publishing its ports on the host.
+//! By default the test starts the broker in Docker. See the README for the
+//! environment variables that select an external broker.
+
+#[path = "support/broker.rs"]
+mod broker;
 
 use std::fs;
-use std::net::TcpListener;
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use rcgen::{BasicConstraints, CertificateParams, IsCa, Issuer, KeyPair};
 use rdkafka::config::ClientConfig;
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::{Message, Offset, TopicPartitionList};
+use rustls::pki_types::pem::PemObject;
+use rustls::pki_types::CertificateDer;
 use rustls::RootCertStore;
-use rustls_relay::{client_config, crypto_provider_name, Relay, RelayContext};
+use rustls_relay::{
+    client_config, crypto_provider_name, ErrorCallback, Relay, RelayContext, RelayErrorKind,
+};
 
 const MESSAGES: usize = 100;
 
-struct Broker {
-    container: String,
-    ssl_port: u16,
-    sasl_ssl_port: u16,
-}
-
-impl Drop for Broker {
-    fn drop(&mut self) {
-        let _ = Command::new("docker")
-            .args(["rm", "-f", &self.container])
-            .output();
-    }
-}
-
-fn free_ports() -> (u16, u16) {
-    let a = TcpListener::bind("127.0.0.1:0").unwrap();
-    let b = TcpListener::bind("127.0.0.1:0").unwrap();
-    (
-        a.local_addr().unwrap().port(),
-        b.local_addr().unwrap().port(),
-    )
-}
-
-/// Writes a test CA and a broker key store, and returns the CA certificate.
-fn write_certs(dir: &Path) -> rustls::pki_types::CertificateDer<'static> {
-    let mut ca_params = CertificateParams::new(Vec::new()).unwrap();
-    ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-    let ca_key = KeyPair::generate().unwrap();
-    let ca_cert = ca_params.self_signed(&ca_key).unwrap();
-    let issuer = Issuer::new(ca_params, ca_key);
-
-    let server_params = CertificateParams::new(vec!["localhost".into()]).unwrap();
-    let server_key = KeyPair::generate().unwrap();
-    let server_cert = server_params.signed_by(&server_key, &issuer).unwrap();
-
-    let keystore = format!(
-        "{}{}{}",
-        server_key.serialize_pem(),
-        server_cert.pem(),
-        ca_cert.pem()
-    );
-    fs::write(dir.join("server.pem"), keystore).unwrap();
-    ca_cert.der().clone()
-}
-
-fn start_broker(dir: &Path) -> Broker {
-    let (ssl_port, sasl_ssl_port) = free_ports();
-    let properties = format!(
-        r#"process.roles=broker,controller
-node.id=1
-controller.quorum.voters=1@localhost:9094
-listeners=INTERNAL://:19092,CONTROLLER://:9094,SSL://:{ssl_port},SASL_SSL://:{sasl_ssl_port}
-advertised.listeners=INTERNAL://localhost:19092,SSL://localhost:{ssl_port},SASL_SSL://localhost:{sasl_ssl_port}
-listener.security.protocol.map=INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,SSL:SSL,SASL_SSL:SASL_SSL
-inter.broker.listener.name=INTERNAL
-controller.listener.names=CONTROLLER
-log.dirs=/tmp/kraft-logs
-num.partitions=1
-offsets.topic.replication.factor=1
-transaction.state.log.replication.factor=1
-transaction.state.log.min.isr=1
-group.initial.rebalance.delay.ms=0
-ssl.keystore.type=PEM
-ssl.keystore.location=/certs/server.pem
-sasl.enabled.mechanisms=PLAIN
-listener.name.sasl_ssl.plain.sasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule required username="admin" password="admin-secret" user_admin="admin-secret" user_alice="alice-secret";
-"#
-    );
-    fs::write(dir.join("server.properties"), properties).unwrap();
-
-    let image = std::env::var("RELAY_KAFKA_IMAGE").unwrap_or_else(|_| "apache/kafka:4.1.1".into());
-    let script = "/opt/kafka/bin/kafka-storage.sh format -t $(/opt/kafka/bin/kafka-storage.sh random-uuid) -c /certs/server.properties \
-                  && exec /opt/kafka/bin/kafka-server-start.sh /certs/server.properties";
-    let mut run = Command::new("docker");
-    run.args(["run", "-d", "--rm"])
-        .args(["-v", &format!("{}:/certs:ro", dir.display())]);
-    match std::env::var("RELAY_DOCKER_NETWORK") {
-        Ok(network) => run.args(["--network", &network]),
-        Err(_) => run
-            .args(["-p", &format!("127.0.0.1:{ssl_port}:{ssl_port}")])
-            .args(["-p", &format!("127.0.0.1:{sasl_ssl_port}:{sasl_ssl_port}")]),
-    };
-    let out = run
-        .args(["--entrypoint", "/bin/bash", &image, "-c", script])
-        .output()
-        .expect("docker run");
-    assert!(
-        out.status.success(),
-        "docker run failed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let broker = Broker {
-        container: String::from_utf8(out.stdout).unwrap().trim().to_string(),
-        ssl_port,
-        sasl_ssl_port,
-    };
-
-    let deadline = Instant::now() + Duration::from_secs(120);
-    loop {
-        let logs = Command::new("docker")
-            .args(["logs", &broker.container])
-            .output()
-            .unwrap();
-        if String::from_utf8_lossy(&logs.stdout).contains("Kafka Server started") {
-            return broker;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "broker did not start: {}{}",
-            String::from_utf8_lossy(&logs.stdout),
-            String::from_utf8_lossy(&logs.stderr)
-        );
-        std::thread::sleep(Duration::from_millis(500));
-    }
+fn env_or(name: &str, default: &str) -> String {
+    std::env::var(name).unwrap_or_else(|_| default.to_string())
 }
 
 fn base_config(bootstrap: &str, security_protocol: &str) -> ClientConfig {
@@ -147,8 +39,14 @@ fn base_config(bootstrap: &str, security_protocol: &str) -> ClientConfig {
     if security_protocol == "sasl_plaintext" {
         config
             .set("sasl.mechanism", "PLAIN")
-            .set("sasl.username", "alice")
-            .set("sasl.password", "alice-secret");
+            .set(
+                "sasl.username",
+                env_or("RELAY_SASL_USERNAME", broker::SASL_USERNAME),
+            )
+            .set(
+                "sasl.password",
+                env_or("RELAY_SASL_PASSWORD", broker::SASL_PASSWORD),
+            );
     }
     config
 }
@@ -227,13 +125,29 @@ async fn tls_round_trip() {
     println!("librdkafka builtin.features: {features}");
     assert!(!features.split(',').any(|f| f == "ssl"));
 
-    let dir =
-        PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("relay-{}", std::process::id()));
-    fs::create_dir_all(&dir).unwrap();
-    let ca = write_certs(&dir);
-    let broker = start_broker(&dir);
-    let ssl = format!("localhost:{}", broker.ssl_port);
-    let sasl_ssl = format!("localhost:{}", broker.sasl_ssl_port);
+    let run_id = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    let mut _docker = None;
+    let (ssl, sasl_ssl, ca) = match std::env::var("RELAY_BOOTSTRAP_SSL") {
+        Ok(ssl) => {
+            let ca_path = std::env::var("RELAY_CA_PEM").expect("RELAY_CA_PEM");
+            let ca = CertificateDer::from_pem_file(&ca_path).expect("read RELAY_CA_PEM");
+            println!("external broker: {ssl}");
+            (ssl, std::env::var("RELAY_BOOTSTRAP_SASL_SSL").ok(), ca)
+        }
+        Err(_) => {
+            let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("relay-{run_id}"));
+            fs::create_dir_all(&dir).unwrap();
+            let ca = broker::write_certs(&dir, "localhost");
+            let docker = broker::start(&dir, "localhost", "127.0.0.1");
+            let ssl = format!("localhost:{}", docker.ssl_port);
+            let sasl_ssl = format!("localhost:{}", docker.sasl_ssl_port);
+            _docker = Some(docker);
+            (ssl, Some(sasl_ssl), ca)
+        }
+    };
 
     let mut roots = RootCertStore::empty();
     roots.add(ca).unwrap();
@@ -245,16 +159,43 @@ async fn tls_round_trip() {
     );
     println!("[control] plaintext without the relay: metadata request failed, as expected");
 
+    let failures = Arc::new(AtomicUsize::new(0));
+    let kinds = Arc::new(Mutex::new(Vec::new()));
+    let on_error: ErrorCallback = {
+        let (failures, kinds) = (failures.clone(), kinds.clone());
+        Arc::new(move |e| {
+            failures.fetch_add(1, Ordering::SeqCst);
+            kinds.lock().unwrap().push(e.kind);
+        })
+    };
+    let untrusted_config = Arc::new(client_config(RootCertStore::empty()).unwrap());
     let untrusted =
-        Arc::new(Relay::start(Arc::new(client_config(RootCertStore::empty()).unwrap())).unwrap());
+        Arc::new(Relay::start_with_error_callback(untrusted_config, Some(on_error)).unwrap());
+    let started = Instant::now();
     assert!(
         !metadata_ok(Some(&untrusted), &ssl),
         "a relay that does not trust the CA must fail"
     );
-    println!("[control] relay without the test CA: metadata request failed, as expected");
+    let failures = failures.load(Ordering::SeqCst);
+    println!(
+        "[control] relay without the test CA: metadata request failed, as expected; \
+         {failures} TLS failures in {:?}",
+        started.elapsed()
+    );
+    // The shortest backoff schedule allows 6 failures in 8 seconds.
+    assert!((1..=8).contains(&failures), "{failures} TLS failures");
+    assert!(kinds
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|k| *k == RelayErrorKind::CertificateInvalid));
 
-    round_trip(&relay, &ssl, "plaintext", "relay-ssl").await;
-    round_trip(&relay, &sasl_ssl, "sasl_plaintext", "relay-sasl-ssl").await;
-    drop(broker);
-    let _ = fs::remove_dir_all(&dir);
+    round_trip(&relay, &ssl, "plaintext", &format!("relay-ssl-{run_id}")).await;
+    match sasl_ssl {
+        Some(sasl_ssl) => {
+            let topic = format!("relay-sasl-ssl-{run_id}");
+            round_trip(&relay, &sasl_ssl, "sasl_plaintext", &topic).await;
+        }
+        None => println!("[sasl_plaintext] skipped: RELAY_BOOTSTRAP_SASL_SSL is not set"),
+    }
 }

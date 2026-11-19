@@ -1,0 +1,82 @@
+# rustls-relay
+
+This crate is a prototype. It gives rust-rdkafka TLS through Rustls, and librdkafka is built without OpenSSL.
+
+librdkafka uses `security.protocol=plaintext` or `sasl_plaintext`. The `ClientContext::connect` hook sends each broker socket to a loopback listener in the process. The relay opens TCP to the broker, does the TLS handshake with Rustls, and copies the bytes.
+
+The `ring` feature (default) and the `symcrypt` feature select the crypto provider.
+
+## Test settings
+
+The round-trip test is `tests/tls_round_trip.rs`. It is ignored by default. Run it with `-- --ignored --nocapture`.
+
+| Variable | Use |
+|---|---|
+| `RELAY_BOOTSTRAP_SSL` | The `host:port` of an SSL listener on an external broker. If you set it, the test does not start Docker. |
+| `RELAY_BOOTSTRAP_SASL_SSL` | The `host:port` of a SASL_SSL listener with SASL PLAIN. If you do not set it, the test skips the SASL part. |
+| `RELAY_CA_PEM` | The absolute path of the CA certificate (PEM) for the external broker. |
+| `RELAY_SASL_USERNAME`, `RELAY_SASL_PASSWORD` | The SASL PLAIN user. The default is `alice` and `alice-secret`. |
+| `RELAY_KAFKA_IMAGE` | The broker image when the test starts Docker. The default is `apache/kafka:4.1.1`. |
+| `RELAY_DOCKER_NETWORK` | A Docker network for the broker, for example `container:<id>`. |
+
+The client uses IPv4 only (`broker.address.family=v4`).
+
+## Run on macOS or Linux with Docker
+
+```sh
+cargo test -p rustls-relay --test tls_round_trip -- --ignored --nocapture
+```
+
+To use SymCrypt on Linux, run `scripts/test-symcrypt-linux.sh` with a SymCrypt Linux release tarball.
+
+## Run on Windows with SymCrypt
+
+A Windows host often cannot run Linux containers. Thus, run the broker on a different machine that has Docker, and point the test at it.
+
+### 1. Start the broker on a Docker host
+
+On a macOS or Linux machine with Docker, in a checkout of this branch:
+
+```sh
+cargo run -p rustls-relay --example serve_broker -- <broker-host> relay-broker
+```
+
+`<broker-host>` is the DNS name or the IPv4 address that the Windows host uses for this machine. The broker certificate is valid for this name. The program prints the two listener addresses. Keep it open. Press Enter to stop the broker.
+
+Make sure that the Windows host can reach the two ports. Copy `relay-broker/ca.pem` to the Windows host.
+
+### 2. Prepare the Windows host
+
+1. Install the Rust MSVC toolchain, the Visual Studio C++ build tools, CMake, and Git.
+2. Clone the repository and check out this branch.
+3. Run `git submodule update --init` to get librdkafka.
+4. Download `symcrypt-windows-amd64-release-<version>.zip` from https://github.com/microsoft/SymCrypt/releases. Use version 103.4.2 or later.
+5. Extract it, for example to `C:\symcrypt`. The `dll` folder has `symcrypt.lib` and `symcrypt.dll`.
+
+### 3. Run the test
+
+In PowerShell, in the repository root:
+
+```powershell
+$env:SYMCRYPT_LIB_PATH = "C:\symcrypt\dll"
+$env:PATH = "C:\symcrypt\dll;$env:PATH"
+$env:RELAY_BOOTSTRAP_SSL = "<broker-host>:<ssl-port>"
+$env:RELAY_BOOTSTRAP_SASL_SSL = "<broker-host>:<sasl-ssl-port>"
+$env:RELAY_CA_PEM = "C:\path\to\ca.pem"
+$env:RUST_LOG = "rustls_relay=info"
+cargo test -p rustls-relay --no-default-features --features symcrypt,rdkafka/cmake-build --test tls_round_trip -- --ignored --nocapture
+```
+
+`SYMCRYPT_LIB_PATH` is the folder with `symcrypt.lib`, for the link step. At run time, Windows finds `symcrypt.dll` through `PATH`. You can also copy `symcrypt.dll` to `target\debug\deps`. The `cmake-build` feature is necessary because the default librdkafka build does not work with MSVC.
+
+A good run prints `crypto provider: symcrypt` and ends with these lines:
+
+```
+[control] plaintext without the relay: metadata request failed, as expected
+[control] relay without the test CA: metadata request failed, as expected; N TLS failures in 8s
+[plaintext] consumed 100 of 100 messages from relay-ssl-<id>
+[sasl_plaintext] consumed 100 of 100 messages from relay-sasl-ssl-<id>
+test tls_round_trip ... ok
+```
+
+N must be 8 or less.
