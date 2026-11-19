@@ -2,6 +2,8 @@
 //!
 //! Run with `cargo test -p rustls-relay --test tls_round_trip -- --ignored --nocapture`.
 //! The test needs Docker. Set `RELAY_KAFKA_IMAGE` to change the broker image.
+//! Set `RELAY_DOCKER_NETWORK` (for example `container:<id>`) to put the broker
+//! on that network instead of publishing its ports on the host.
 
 use std::fs;
 use std::net::TcpListener;
@@ -93,11 +95,16 @@ listener.name.sasl_ssl.plain.sasl.jaas.config=org.apache.kafka.common.security.p
     let image = std::env::var("RELAY_KAFKA_IMAGE").unwrap_or_else(|_| "apache/kafka:4.1.1".into());
     let script = "/opt/kafka/bin/kafka-storage.sh format -t $(/opt/kafka/bin/kafka-storage.sh random-uuid) -c /certs/server.properties \
                   && exec /opt/kafka/bin/kafka-server-start.sh /certs/server.properties";
-    let out = Command::new("docker")
-        .args(["run", "-d", "--rm"])
-        .args(["-v", &format!("{}:/certs:ro", dir.display())])
-        .args(["-p", &format!("127.0.0.1:{ssl_port}:{ssl_port}")])
-        .args(["-p", &format!("127.0.0.1:{sasl_ssl_port}:{sasl_ssl_port}")])
+    let mut run = Command::new("docker");
+    run.args(["run", "-d", "--rm"])
+        .args(["-v", &format!("{}:/certs:ro", dir.display())]);
+    match std::env::var("RELAY_DOCKER_NETWORK") {
+        Ok(network) => run.args(["--network", &network]),
+        Err(_) => run
+            .args(["-p", &format!("127.0.0.1:{ssl_port}:{ssl_port}")])
+            .args(["-p", &format!("127.0.0.1:{sasl_ssl_port}:{sasl_ssl_port}")]),
+    };
+    let out = run
         .args(["--entrypoint", "/bin/bash", &image, "-c", script])
         .output()
         .expect("docker run");
