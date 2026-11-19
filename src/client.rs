@@ -17,6 +17,7 @@ use std::io;
 use std::mem::ManuallyDrop;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::os::raw::{c_char, c_int};
+use std::panic::{self, AssertUnwindSafe};
 use std::ptr;
 use std::string::ToString;
 use std::sync::Arc;
@@ -714,11 +715,19 @@ unsafe extern "C" fn native_connect_cb<C: ClientContext>(
     // librdkafka passes the Windows SOCKET truncated to an int.
     #[cfg(windows)]
     let sockfd = sockfd as std::os::raw::c_uint as BrokerSocket;
-    match context.connect(sockfd, addr, &broker_name) {
-        Ok(()) => 0,
-        Err(e) => {
-            warn!("Connect callback for broker {} failed: {}", broker_name, e);
+    // A panic must not unwind into librdkafka, which holds the broker lock.
+    let result = panic::catch_unwind(AssertUnwindSafe(|| {
+        context.connect(sockfd, addr, &broker_name)
+    }));
+    match result {
+        Ok(Ok(())) => 0,
+        Ok(Err(e)) => {
+            debug!("Connect callback for broker {} failed: {}", broker_name, e);
             e.raw_os_error().unwrap_or(libc::EINVAL)
+        }
+        Err(_) => {
+            error!("Connect callback for broker {} panicked", broker_name);
+            libc::EINVAL
         }
     }
 }
@@ -884,6 +893,29 @@ mod tests {
             };
             assert_eq!(got, Some(want));
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_connect_cb_catches_panic() {
+        struct PanicContext;
+        impl ClientContext for PanicContext {
+            const ENABLE_CONNECT_CALLBACK: bool = true;
+            fn connect(&self, _: BrokerSocket, _: SocketAddr, _: &str) -> io::Result<()> {
+                panic!("connect panicked");
+            }
+        }
+        let sock = socket_addr_to_raw("127.0.0.1:9093".parse().unwrap());
+        let ret = unsafe {
+            native_connect_cb::<PanicContext>(
+                -1,
+                &sock as *const libc::sockaddr_storage as *const libc::sockaddr,
+                std::mem::size_of_val(&sock) as c_int,
+                b"localhost:9093\0".as_ptr() as *const c_char,
+                &PanicContext as *const PanicContext as *mut c_void,
+            )
+        };
+        assert_eq!(ret, libc::EINVAL);
     }
 
     #[cfg(unix)]
