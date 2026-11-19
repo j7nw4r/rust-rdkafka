@@ -13,7 +13,7 @@ exclude = ["Cargo.lock"]
 rust-version = "1.74"
 
 [workspace]
-members = ["rdkafka-sys"]
+members = ["rdkafka-sys", "rustls-relay"]
 
 [dependencies]
 rdkafka-sys = { path = "rdkafka-sys", version = "4.10.0", default-features = false }
