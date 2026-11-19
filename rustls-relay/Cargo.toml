@@ -3,13 +3,14 @@ name = "rustls-relay"
 version = "0.0.0"
 edition = "2021"
 publish = false
-description = "Prototype: TLS for rust-rdkafka through Rustls, with librdkafka built without OpenSSL"
+description = "Prototype: TLS for rust-rdkafka through Rustls or SChannel, with librdkafka built without OpenSSL"
 license = "MIT"
 
 [features]
 default = ["ring"]
 ring = ["rustls/ring"]
 symcrypt = ["dep:rustls-symcrypt", "rustls/custom-provider"]
+schannel = ["dep:native-tls", "dep:tokio-native-tls"]
 
 [dependencies]
 rdkafka = { path = "..", default-features = false, features = ["tokio"] }
@@ -27,3 +28,8 @@ tokio = { version = "1.45", features = ["macros"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+# native-tls uses OpenSSL on other targets, so it is a Windows-only dependency.
+[target.'cfg(windows)'.dependencies]
+native-tls = { version = "0.2.18", optional = true }
+tokio-native-tls = { version = "0.3.1", optional = true }

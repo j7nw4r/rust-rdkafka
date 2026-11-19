@@ -19,12 +19,32 @@ use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::{Message, Offset, TopicPartitionList};
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::CertificateDer;
-use rustls::RootCertStore;
-use rustls_relay::{
-    client_config, crypto_provider_name, ErrorCallback, Relay, RelayContext, RelayErrorKind,
-};
+use rustls_relay::{ErrorCallback, Relay, RelayContext, RelayErrorKind, TlsConfig};
 
 const MESSAGES: usize = 100;
+
+/// Makes the TLS settings for `RELAY_TLS_BACKEND`, with `ca` as an extra root.
+fn tls_config(ca: Option<&CertificateDer<'static>>) -> TlsConfig {
+    let default = if cfg!(any(feature = "ring", feature = "symcrypt")) {
+        "rustls"
+    } else {
+        "schannel"
+    };
+    match env_or("RELAY_TLS_BACKEND", default).as_str() {
+        #[cfg(any(feature = "ring", feature = "symcrypt"))]
+        "rustls" => {
+            let mut roots = rustls::RootCertStore::empty();
+            roots.add_parsable_certificates(ca.cloned());
+            Arc::new(rustls_relay::client_config(roots).unwrap()).into()
+        }
+        #[cfg(all(windows, feature = "schannel"))]
+        "schannel" => {
+            let roots: Vec<CertificateDer<'static>> = ca.into_iter().cloned().collect();
+            TlsConfig::schannel(&roots).unwrap()
+        }
+        other => panic!("TLS backend {other} is not in this build"),
+    }
+}
 
 fn env_or(name: &str, default: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| default.to_string())
@@ -116,7 +136,7 @@ fn metadata_ok(relay: Option<&Arc<Relay>>, bootstrap: &str) -> bool {
 #[ignore = "needs Docker"]
 async fn tls_round_trip() {
     let _ = env_logger::builder().is_test(true).try_init();
-    println!("crypto provider: {}", crypto_provider_name());
+    println!("tls backend: {}", tls_config(None).describe());
     let features = ClientConfig::new()
         .create_native_config()
         .unwrap()
@@ -149,9 +169,7 @@ async fn tls_round_trip() {
         }
     };
 
-    let mut roots = RootCertStore::empty();
-    roots.add(ca).unwrap();
-    let relay = Arc::new(Relay::start(Arc::new(client_config(roots).unwrap())).unwrap());
+    let relay = Arc::new(Relay::start(tls_config(Some(&ca))).unwrap());
 
     assert!(
         !metadata_ok(None, &ssl),
@@ -168,7 +186,7 @@ async fn tls_round_trip() {
             kinds.lock().unwrap().push(e.kind);
         })
     };
-    let untrusted_config = Arc::new(client_config(RootCertStore::empty()).unwrap());
+    let untrusted_config = tls_config(None);
     let untrusted =
         Arc::new(Relay::start_with_error_callback(untrusted_config, Some(on_error)).unwrap());
     let started = Instant::now();

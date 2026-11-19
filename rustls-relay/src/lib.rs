@@ -4,7 +4,8 @@
 //! librdkafka uses `security.protocol=plaintext` (or `sasl_plaintext`). The
 //! connect hook on [`ClientContext`] sends each broker socket to a loopback
 //! listener in this process. The relay opens TCP to the real broker, does the
-//! TLS handshake with Rustls, and copies bytes in both directions.
+//! TLS handshake, and copies bytes in both directions. The TLS backend is
+//! Rustls or, on Windows, SChannel. See [`TlsConfig`].
 //!
 //! After a failed broker connection, the relay refuses new connections to
 //! that broker address for a backoff time. The refusal happens in the
@@ -25,48 +26,20 @@ use rdkafka::client::BrokerSocket;
 use rdkafka::consumer::ConsumerContext;
 use rdkafka::ClientContext;
 use rustls::pki_types::ServerName;
-use rustls::{ClientConfig, RootCertStore};
 use socket2::{SockAddr, SockRef};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::runtime::Runtime;
-use tokio_rustls::TlsConnector;
 
-#[cfg(not(any(feature = "ring", feature = "symcrypt")))]
-compile_error!("Enable the `ring` or the `symcrypt` feature.");
+mod tls;
+
+pub use tls::TlsConfig;
+#[cfg(any(feature = "ring", feature = "symcrypt"))]
+pub use tls::{client_config, crypto_provider, crypto_provider_name};
 
 const BROKER_TIMEOUT: Duration = Duration::from_secs(10);
 const PENDING_TTL: Duration = Duration::from_secs(10);
 const BACKOFF_BASE: Duration = Duration::from_millis(500);
 const BACKOFF_CAP: Duration = Duration::from_secs(30);
-
-/// Returns the Rustls crypto provider that the cargo features select.
-///
-/// The `symcrypt` feature has priority over the `ring` feature.
-pub fn crypto_provider() -> rustls::crypto::CryptoProvider {
-    #[cfg(feature = "symcrypt")]
-    return rustls_symcrypt::default_symcrypt_provider();
-    #[cfg(not(feature = "symcrypt"))]
-    return rustls::crypto::ring::default_provider();
-}
-
-/// Returns the name of the crypto provider that [`crypto_provider`] uses.
-pub fn crypto_provider_name() -> &'static str {
-    if cfg!(feature = "symcrypt") {
-        "symcrypt"
-    } else {
-        "ring"
-    }
-}
-
-/// Makes a Rustls client configuration that trusts `roots`.
-pub fn client_config(roots: RootCertStore) -> Result<ClientConfig, rustls::Error> {
-    Ok(
-        ClientConfig::builder_with_provider(Arc::new(crypto_provider()))
-            .with_safe_default_protocol_versions()?
-            .with_root_certificates(roots)
-            .with_no_client_auth(),
-    )
-}
 
 /// The type of a failed broker connection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -195,7 +168,7 @@ impl PendingMap {
 struct Shared {
     pending: Mutex<PendingMap>,
     backoff: Mutex<Backoff>,
-    connector: TlsConnector,
+    connector: tls::Connector,
     on_error: Option<ErrorCallback>,
 }
 
@@ -228,14 +201,14 @@ pub struct Relay {
 
 impl Relay {
     /// Starts the relay listeners and its Tokio runtime.
-    pub fn start(tls: Arc<ClientConfig>) -> io::Result<Relay> {
+    pub fn start(tls: impl Into<TlsConfig>) -> io::Result<Relay> {
         Relay::start_with_error_callback(tls, None)
     }
 
     /// Starts the relay, and calls `on_error` for each failed broker
     /// connection.
     pub fn start_with_error_callback(
-        tls: Arc<ClientConfig>,
+        tls: impl Into<TlsConfig>,
         on_error: Option<ErrorCallback>,
     ) -> io::Result<Relay> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -246,7 +219,7 @@ impl Relay {
         let shared = Arc::new(Shared {
             pending: Mutex::default(),
             backoff: Mutex::default(),
-            connector: TlsConnector::from(tls),
+            connector: tls.into().into(),
             on_error,
         });
         let v4 = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
@@ -372,13 +345,6 @@ fn classify_tcp(e: &io::Error) -> RelayErrorKind {
     }
 }
 
-fn classify_handshake(e: &io::Error) -> RelayErrorKind {
-    match e.get_ref().and_then(|e| e.downcast_ref::<rustls::Error>()) {
-        Some(rustls::Error::InvalidCertificate(_)) => RelayErrorKind::CertificateInvalid,
-        _ => RelayErrorKind::Tls,
-    }
-}
-
 async fn accept_loop(listener: TcpListener, shared: Arc<Shared>) {
     loop {
         let (local, peer) = match listener.accept().await {
@@ -415,7 +381,7 @@ async fn relay(mut local: TcpStream, target: Target, shared: Arc<Shared>) {
     let handshake = shared.connector.connect(name, tcp);
     let mut tls = match tokio::time::timeout(BROKER_TIMEOUT, handshake).await {
         Ok(Ok(tls)) => tls,
-        Ok(Err(e)) => return shared.fail(&target, classify_handshake(&e), e.to_string()),
+        Ok(Err((kind, message))) => return shared.fail(&target, kind, message),
         Err(_) => {
             let message = format!("TLS handshake took more than {BROKER_TIMEOUT:?}");
             return shared.fail(&target, RelayErrorKind::Timeout, message);
@@ -541,21 +507,10 @@ mod tests {
     }
 
     #[test]
-    fn test_classify_errors() {
-        let cert = io::Error::new(
-            io::ErrorKind::InvalidData,
-            rustls::Error::InvalidCertificate(rustls::CertificateError::UnknownIssuer),
-        );
-        assert_eq!(
-            classify_handshake(&cert),
-            RelayErrorKind::CertificateInvalid
-        );
-        let alert = io::Error::new(
-            io::ErrorKind::InvalidData,
-            rustls::Error::AlertReceived(rustls::AlertDescription::HandshakeFailure),
-        );
-        assert_eq!(classify_handshake(&alert), RelayErrorKind::Tls);
+    fn test_classify_tcp() {
         let refused = io::Error::from(io::ErrorKind::ConnectionRefused);
         assert_eq!(classify_tcp(&refused), RelayErrorKind::TcpConnectRefused);
+        let reset = io::Error::from(io::ErrorKind::ConnectionReset);
+        assert_eq!(classify_tcp(&reset), RelayErrorKind::TcpConnect);
     }
 }
