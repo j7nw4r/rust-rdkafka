@@ -13,8 +13,10 @@
 
 use std::error::Error;
 use std::ffi::{CStr, CString};
+use std::io;
 use std::mem::ManuallyDrop;
-use std::os::raw::c_char;
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::os::raw::{c_char, c_int};
 use std::ptr;
 use std::string::ToString;
 use std::sync::Arc;
@@ -57,6 +59,12 @@ pub trait ClientContext: Send + Sync {
     /// This parameter is only relevant when using the `OAUTHBEARER` SASL
     /// mechanism.
     const ENABLE_REFRESH_OAUTH_TOKEN: bool = false;
+
+    /// Whether librdkafka calls [`ClientContext::connect`] to connect each
+    /// broker socket.
+    ///
+    /// If disabled, librdkafka connects the socket itself.
+    const ENABLE_CONNECT_CALLBACK: bool = false;
 
     /// Receives log lines from librdkafka.
     ///
@@ -134,11 +142,47 @@ pub trait ClientContext: Send + Sync {
         Err("Default implementation of generate_oauth_token must be overridden".into())
     }
 
+    /// Connects a broker socket that librdkafka created.
+    ///
+    /// librdkafka calls this method only when
+    /// [`ClientContext::ENABLE_CONNECT_CALLBACK`] is true. `socket` is a
+    /// non-blocking TCP socket that librdkafka owns. Do not close it. `addr`
+    /// is the resolved broker address. `broker_name` is the broker name in
+    /// the form `host:port`.
+    ///
+    /// librdkafka calls this method on a broker thread while it holds the
+    /// broker lock, so the method must not block. Start a non-blocking
+    /// connect and return `Ok(())` if the connect is complete or in progress.
+    /// librdkafka then waits until the socket is writable. If you return an
+    /// error, librdkafka uses its OS error code, or `EINVAL` if it has none.
+    ///
+    /// The default implementation returns an error and is meant to be
+    /// overridden.
+    fn connect(
+        &self,
+        _socket: BrokerSocket,
+        _addr: SocketAddr,
+        _broker_name: &str,
+    ) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Default implementation of connect must be overridden",
+        ))
+    }
+
     // NOTE: when adding a new method, remember to add it to the
     // FutureProducerContext as well.
     // https://github.com/rust-lang/rfcs/pull/1406 will maybe help in the
     // future.
 }
+
+/// A raw broker socket, as passed to [`ClientContext::connect`].
+#[cfg(unix)]
+pub type BrokerSocket = std::os::unix::io::RawFd;
+
+/// A raw broker socket, as passed to [`ClientContext::connect`].
+#[cfg(windows)]
+pub type BrokerSocket = std::os::windows::io::RawSocket;
 
 /// An empty [`ClientContext`] that can be used when no customizations are
 /// needed.
@@ -255,6 +299,14 @@ impl<C: ClientContext> Client<C> {
             )
         };
         native_config.set("log.queue", "true")?;
+        if C::ENABLE_CONNECT_CALLBACK {
+            unsafe {
+                rdsys::rd_kafka_conf_set_connect_cb(
+                    native_config.ptr(),
+                    Some(native_connect_cb::<C>),
+                )
+            };
+        }
 
         let client_ptr = unsafe {
             let native_config = ManuallyDrop::new(native_config);
@@ -643,6 +695,93 @@ impl NativeQueue {
     }
 }
 
+unsafe extern "C" fn native_connect_cb<C: ClientContext>(
+    sockfd: c_int,
+    addr: *const libc::sockaddr,
+    addrlen: c_int,
+    id: *const c_char,
+    opaque: *mut c_void,
+) -> c_int {
+    let context = &*(opaque as *const C);
+    let Some(addr) = sockaddr_to_std(addr, addrlen) else {
+        return libc::EINVAL;
+    };
+    let broker_name = if id.is_null() {
+        "".into()
+    } else {
+        CStr::from_ptr(id).to_string_lossy()
+    };
+    // librdkafka passes the Windows SOCKET truncated to an int.
+    #[cfg(windows)]
+    let sockfd = sockfd as std::os::raw::c_uint as BrokerSocket;
+    match context.connect(sockfd, addr, &broker_name) {
+        Ok(()) => 0,
+        Err(e) => {
+            warn!("Connect callback for broker {} failed: {}", broker_name, e);
+            e.raw_os_error().unwrap_or(libc::EINVAL)
+        }
+    }
+}
+
+#[cfg(unix)]
+unsafe fn sockaddr_to_std(addr: *const libc::sockaddr, len: c_int) -> Option<SocketAddr> {
+    let len = usize::try_from(len).ok()?;
+    if addr.is_null() || len < std::mem::size_of::<libc::sockaddr>() {
+        return None;
+    }
+    match c_int::from((*addr).sa_family) {
+        libc::AF_INET if len >= std::mem::size_of::<libc::sockaddr_in>() => {
+            let sin = ptr::read_unaligned(addr as *const libc::sockaddr_in);
+            Some(SocketAddr::V4(SocketAddrV4::new(
+                Ipv4Addr::from(u32::from_be(sin.sin_addr.s_addr)),
+                u16::from_be(sin.sin_port),
+            )))
+        }
+        libc::AF_INET6 if len >= std::mem::size_of::<libc::sockaddr_in6>() => {
+            let sin6 = ptr::read_unaligned(addr as *const libc::sockaddr_in6);
+            Some(SocketAddr::V6(SocketAddrV6::new(
+                Ipv6Addr::from(sin6.sin6_addr.s6_addr),
+                u16::from_be(sin6.sin6_port),
+                sin6.sin6_flowinfo,
+                sin6.sin6_scope_id,
+            )))
+        }
+        _ => None,
+    }
+}
+
+// The libc crate has no SOCKADDR_IN or SOCKADDR_IN6 for Windows, so this
+// function reads the documented Winsock layouts directly.
+#[cfg(windows)]
+unsafe fn sockaddr_to_std(addr: *const libc::sockaddr, len: c_int) -> Option<SocketAddr> {
+    const AF_INET: u16 = 2;
+    const AF_INET6: u16 = 23;
+    let len = usize::try_from(len).ok()?;
+    if addr.is_null() || len < 16 {
+        return None;
+    }
+    let b = std::slice::from_raw_parts(addr as *const u8, len);
+    let u32_at = |i: usize| u32::from_ne_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]]);
+    let port = u16::from_be_bytes([b[2], b[3]]);
+    match u16::from_ne_bytes([b[0], b[1]]) {
+        AF_INET => Some(SocketAddr::V4(SocketAddrV4::new(
+            Ipv4Addr::new(b[4], b[5], b[6], b[7]),
+            port,
+        ))),
+        AF_INET6 if len >= 28 => {
+            let mut ip = [0u8; 16];
+            ip.copy_from_slice(&b[8..24]);
+            Some(SocketAddr::V6(SocketAddrV6::new(
+                Ipv6Addr::from(ip),
+                port,
+                u32_at(4),
+                u32_at(24),
+            )))
+        }
+        _ => None,
+    }
+}
+
 /// A generated OAuth token and its associated metadata.
 ///
 /// When using the `OAUTHBEARER` SASL authentication method, this type is
@@ -729,5 +868,42 @@ mod tests {
 
         let result = client.sasl_set_credentials("user", "pass\0word");
         assert!(result.is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_sockaddr_to_std() {
+        for want in ["192.0.2.7:9093", "[2001:db8::1]:19093"] {
+            let want: SocketAddr = want.parse().unwrap();
+            let sock = socket_addr_to_raw(want);
+            let got = unsafe {
+                sockaddr_to_std(
+                    &sock as *const libc::sockaddr_storage as *const libc::sockaddr,
+                    std::mem::size_of_val(&sock) as c_int,
+                )
+            };
+            assert_eq!(got, Some(want));
+        }
+    }
+
+    #[cfg(unix)]
+    fn socket_addr_to_raw(addr: SocketAddr) -> libc::sockaddr_storage {
+        let mut storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
+        let p = &mut storage as *mut libc::sockaddr_storage;
+        match addr {
+            SocketAddr::V4(a) => unsafe {
+                let sin = &mut *(p as *mut libc::sockaddr_in);
+                sin.sin_family = libc::AF_INET as _;
+                sin.sin_port = a.port().to_be();
+                sin.sin_addr.s_addr = u32::from(*a.ip()).to_be();
+            },
+            SocketAddr::V6(a) => unsafe {
+                let sin6 = &mut *(p as *mut libc::sockaddr_in6);
+                sin6.sin6_family = libc::AF_INET6 as _;
+                sin6.sin6_port = a.port().to_be();
+                sin6.sin6_addr.s6_addr = a.ip().octets();
+            },
+        }
+        storage
     }
 }

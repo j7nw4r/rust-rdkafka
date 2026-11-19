@@ -8,6 +8,8 @@ See also the [rdkafka-sys changelog](rdkafka-sys/changelog.md).
   librdkafka. A remainder below 1 ms became 0 ms, so `BaseProducer::poll` and
   `BaseConsumer::poll` busy-looped through the last millisecond of every call.
   An idle `ThreadedProducer` or `FutureProducer` cost about 1% of a CPU core.
+* Add `ClientContext::ENABLE_CONNECT_CALLBACK` and `ClientContext::connect`, an
+  opt-in hook for the librdkafka connect callback.
 
 ## 0.39.0 (2026-01-25)
 
