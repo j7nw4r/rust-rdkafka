@@ -4,7 +4,10 @@ See also the [rdkafka-sys changelog](rdkafka-sys/changelog.md).
 
 ## Unreleased
 
-None
+* Add the experimental `rustls` and `rustls-fips` features. They re-export
+  the new `rdkafka-sys` features. `rustls-fips` also enables `rustls`.
+* Add the `tls_roundtrip` example, which produces and consumes records over
+  TLS or mTLS and can set `ssl.fips.mode=required`.
 
 ## 0.40.0 (2026-11-21)
 
