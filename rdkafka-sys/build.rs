@@ -40,6 +40,10 @@ where
 }
 
 fn main() {
+    if env::var("CARGO_FEATURE_RUSTLS").is_ok() {
+        check_rustls_features();
+    }
+
     if env::var("CARGO_FEATURE_DYNAMIC_LINKING").is_ok() {
         eprintln!("librdkafka will be linked dynamically");
 
@@ -95,8 +99,68 @@ fn main() {
             eprintln!("Setting up submodules");
             run_command_or_fail("../", "git", &["submodule", "update", "--init"]);
         }
-        eprintln!("Building and linking librdkafka statically");
+        if env::var("CARGO_FEATURE_RUSTLS").is_ok() {
+            eprintln!("Building librdkafka with rustls and linking it dynamically");
+        } else {
+            eprintln!("Building and linking librdkafka statically");
+        }
         build_librdkafka();
+    }
+}
+
+// A rustls build has rustls-ffi as its only crypto stack. The features that
+// add OpenSSL, Cyrus SASL or curl would bring in a second one.
+fn check_rustls_features() {
+    let conflicts: Vec<&str> = [
+        ("SSL", "ssl"),
+        ("GSSAPI", "gssapi"),
+        ("CURL", "curl"),
+        ("CURL_STATIC", "curl-static"),
+        ("DYNAMIC_LINKING", "dynamic-linking"),
+        ("STATIC_LINKING", "static-linking"),
+    ]
+    .iter()
+    .filter(|(var, _)| env::var(format!("CARGO_FEATURE_{}", var)).is_ok())
+    .map(|(_, feature)| *feature)
+    .collect();
+
+    if !conflicts.is_empty() {
+        eprintln!(
+            "error: the `rustls` feature cannot be combined with these features: {}",
+            conflicts.join(", ")
+        );
+        eprintln!(
+            "The `rustls` feature builds librdkafka with rustls-ffi as its only TLS library, \
+             without OpenSSL, SASL GSSAPI or curl. `ssl-vendored`, `gssapi-vendored` and `sasl` \
+             enable `ssl` or `gssapi`. To link an installed rustls librdkafka, use \
+             `dynamic-linking` without `rustls`."
+        );
+        process::exit(1);
+    }
+}
+
+#[cfg(feature = "cmake-build")]
+fn check_rustls_fips(dst: &Path) {
+    let config_h = dst.join("build/generated/config.h");
+    let contents = fs::read_to_string(&config_h)
+        .unwrap_or_else(|e| panic!("Cannot read {}: {}", config_h.display(), e));
+    let fips = contents.lines().any(|line| {
+        line.split_whitespace().collect::<Vec<_>>() == ["#define", "WITH_RUSTLS_FIPS", "1"]
+    });
+    if !fips {
+        eprintln!(
+            "error: the `rustls-fips` feature needs a FIPS rustls-ffi, but librdkafka was built \
+             without FIPS support (WITH_RUSTLS_FIPS is not 1 in {}).",
+            config_h.display()
+        );
+        eprintln!(
+            "CMake could not link rustls_default_fips_provider() from the rustls-ffi that \
+             pkg-config found. Build rustls-ffi 0.15.7 with `--no-default-features --features \
+             fips,aws-lc-rs`, write a rustls.pc that lists every link input in `Libs`, and put \
+             its directory first in PKG_CONFIG_PATH. The CMake probe logs are in {}.",
+            dst.join("build/CMakeFiles").display()
+        );
+        process::exit(1);
     }
 }
 
@@ -222,9 +286,12 @@ fn build_librdkafka() {
 fn build_librdkafka() {
     let mut config = cmake::Config::new("librdkafka");
     let mut cmake_library_paths = vec![];
+    let rustls = env::var("CARGO_FEATURE_RUSTLS").is_ok();
 
     config
-        .define("RDKAFKA_BUILD_STATIC", "1")
+        // librdkafka rejects a static library with rustls FIPS, and a shared
+        // library keeps the rustls-ffi Rust staticlib out of the Rust binary.
+        .define("RDKAFKA_BUILD_STATIC", if rustls { "0" } else { "1" })
         .define("RDKAFKA_BUILD_TESTS", "0")
         .define("RDKAFKA_BUILD_EXAMPLES", "0")
         // CMAKE_INSTALL_LIBDIR is inferred as "lib64" on some platforms, but we
@@ -315,6 +382,21 @@ fn build_librdkafka() {
         config.define("ENABLE_LZ4_EXT", "0");
     }
 
+    if rustls {
+        config.define("RDKAFKA_TLS_BACKEND", "rustls");
+        // Let the installed librdkafka find a shared rustls-ffi where it was
+        // at build time.
+        config.define("CMAKE_INSTALL_RPATH_USE_LINK_PATH", "ON");
+        // Any rerun-if line turns off the default rerun on any package change.
+        println!("cargo:rerun-if-changed=build.rs");
+        println!("cargo:rerun-if-changed=librdkafka");
+        println!("cargo:rerun-if-env-changed=PKG_CONFIG_PATH");
+        // CMake caches the pkg-config result and the FIPS link probe. Start
+        // from an empty cache so that a new PKG_CONFIG_PATH takes effect.
+        let out_dir = env::var("OUT_DIR").expect("OUT_DIR missing");
+        let _ = fs::remove_file(Path::new(&out_dir).join("build/CMakeCache.txt"));
+    }
+
     if let Ok(system_name) = env::var("CMAKE_SYSTEM_NAME") {
         config.define("CMAKE_SYSTEM_NAME", system_name);
     }
@@ -331,5 +413,17 @@ fn build_librdkafka() {
     let dst = config.build();
 
     println!("cargo:rustc-link-search=native={}/lib", dst.display());
-    println!("cargo:rustc-link-lib=static=rdkafka");
+    if rustls {
+        if env::var("CARGO_FEATURE_RUSTLS_FIPS").is_ok() {
+            check_rustls_fips(&dst);
+        }
+        // Cargo adds link search paths inside the target directory to the
+        // library path of `cargo run` and `cargo test`. rdkafka.dll is in bin.
+        if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+            println!("cargo:rustc-link-search=native={}/bin", dst.display());
+        }
+        println!("cargo:rustc-link-lib=dylib=rdkafka");
+    } else {
+        println!("cargo:rustc-link-lib=static=rdkafka");
+    }
 }

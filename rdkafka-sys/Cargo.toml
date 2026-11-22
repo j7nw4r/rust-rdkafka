@@ -56,6 +56,16 @@ ssl = ["openssl-sys"]
 # crate.
 ssl-vendored = ["ssl", "openssl-sys/vendored"]
 
+# Experimental. Use rustls-ffi 0.15.7 as the broker TLS library instead of
+# OpenSSL. Builds librdkafka as a shared library with CMake and links it
+# dynamically. CMake finds rustls-ffi with pkg-config. Conflicts with `ssl`,
+# `gssapi` and `curl`.
+rustls = ["cmake-build"]
+
+# Experimental. Like `rustls`, but fails the build unless the rustls-ffi that
+# pkg-config finds supports FIPS, so that `ssl.fips.mode=required` can work.
+rustls-fips = ["rustls"]
+
 # Enable SASL GSSAPI support with Cyrus libsasl2.
 gssapi = ["ssl", "sasl2-sys"]
 
