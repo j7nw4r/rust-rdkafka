@@ -123,6 +123,9 @@ impl Check {
         for (key, value) in extra {
             config.set(*key, *value);
         }
+        // rust-rdkafka otherwise sets the level from the `log` crate, which
+        // has no logger here. CheckContext::log filters by --log-level.
+        config.set_log_level(RDKafkaLogLevel::Debug);
         config
             .create_with_context(CheckContext::default())
             .unwrap_or_else(|err| self.fail(4, format!("client creation: {}", err)))

@@ -109,7 +109,7 @@ jobs:
           $check --mode features \
             --expect-features ssl,crypto,tls_schannel,crypto_bcrypt,sasl_oauthbearer,http,oidc
           # One token request can take the HTTP timeout (20 s) plus retries.
-          check="$check --timeout 120 --log-level 7"
+          check="$check --timeout 120"
           oidc=(-X bootstrap.servers=127.0.0.1:1 -X security.protocol=sasl_plaintext
             -X sasl.mechanisms=OAUTHBEARER -X sasl.oauthbearer.method=oidc
             -X "sasl.oauthbearer.token.endpoint.url=$(cat "$dir/token-url")")
