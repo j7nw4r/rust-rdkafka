@@ -6,16 +6,18 @@
 //! * `roundtrip` (default): creates a new topic, produces `--count` records
 //!   with distinct keys, consumes them back and compares every key and value.
 //! * `metadata`: fetches cluster metadata only.
+//! * `oauth`: waits until the built-in SASL OAUTHBEARER (OIDC) handler fetches
+//!   a token and librdkafka accepts it. No broker is needed.
 //! * `create`: creates a producer only. No broker is needed.
 //! * `features`: prints `builtin.features` only. No broker is needed.
 //!
 //! Exit codes: 0 success, 2 usage, 3 missing feature, 4 client creation,
 //! 5 metadata or topic creation, 6 delivery, 7 consume or mismatch,
-//! 8 an `--expect-error` text did not appear.
+//! 8 an `--expect-error` text did not appear, 9 OAUTHBEARER token.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::process;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -37,10 +39,16 @@ struct CheckContext {
     delivered: AtomicUsize,
     failed: AtomicUsize,
     first_failure: Mutex<Option<String>>,
+    token_set: AtomicBool,
+    token_error: Mutex<Option<String>>,
 }
 
 impl ClientContext for CheckContext {
     fn log(&self, level: RDKafkaLogLevel, fac: &str, log_message: &str) {
+        // librdkafka logs this (debug=security) after it accepts a token.
+        if log_message.contains("after setting OAUTHBEARER token") {
+            self.token_set.store(true, Ordering::SeqCst);
+        }
         if (level as i32) <= RDKafkaLogLevel::Warning as i32 {
             eprintln!("librdkafka {:?} {}: {}", level, fac, log_message);
         }
@@ -48,6 +56,10 @@ impl ClientContext for CheckContext {
 
     fn error(&self, error: KafkaError, reason: &str) {
         eprintln!("librdkafka error: {}: {}", error, reason);
+        if reason.contains("OAUTHBEARER token") {
+            let mut first = self.token_error.lock().unwrap();
+            first.get_or_insert_with(|| reason.to_string());
+        }
     }
 }
 
@@ -129,6 +141,27 @@ impl Check {
                 self.fail(5, format!("metadata: {}", err))
             }
         }
+    }
+
+    fn oauth(&self) {
+        let debug = self.config.get("debug").unwrap_or("security").to_string();
+        let producer: BaseProducer<CheckContext> = self.client(&[("debug", debug.as_str())]);
+        let deadline = Instant::now() + self.timeout;
+        // Polling serves the built-in token refresh.
+        while Instant::now() < deadline {
+            producer.poll(Duration::from_millis(200));
+            if let Some(reason) = producer.context().token_error.lock().unwrap().clone() {
+                self.fail(9, format!("oauth: {}", reason));
+            }
+            if producer.context().token_set.load(Ordering::SeqCst) {
+                println!("OAUTHBEARER token set");
+                return;
+            }
+        }
+        self.fail(
+            9,
+            format!("oauth: no OAUTHBEARER token after {:?}", self.timeout),
+        );
     }
 
     fn create_topic(&self, topic: &str) {
@@ -247,7 +280,7 @@ fn main() {
         .arg(
             Arg::new("mode")
                 .long("mode")
-                .value_parser(["roundtrip", "metadata", "create", "features"])
+                .value_parser(["roundtrip", "metadata", "oauth", "create", "features"])
                 .default_value("roundtrip"),
         )
         .arg(
@@ -323,6 +356,10 @@ fn main() {
         "metadata" => {
             check.metadata();
             check.succeeded("metadata");
+        }
+        "oauth" => {
+            check.oauth();
+            check.succeeded("oauth");
         }
         _ => {
             let topic = matches

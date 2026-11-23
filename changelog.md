@@ -7,7 +7,8 @@ See also the [rdkafka-sys changelog](rdkafka-sys/changelog.md).
 * Add the experimental, Windows-only `schannel` feature, a re-export of the
   new `rdkafka-sys` feature.
 * Add the `tls_check` example. It takes `-X` librdkafka properties and checks
-  a broker with a produce/consume roundtrip or a metadata request.
+  a broker with a produce/consume roundtrip or a metadata request. Its
+  `oauth` mode checks that the built-in OIDC handler gets a token.
 
 ## 0.40.0 (2026-11-21)
 
