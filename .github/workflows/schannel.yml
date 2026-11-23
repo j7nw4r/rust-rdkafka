@@ -37,6 +37,9 @@ jobs:
       - run: cargo build --features schannel,libz-static --example tls_check
       - name: Offline tls_check checks
         shell: bash
+        # Git Bash would turn "/CN=..." into a Windows path.
+        env:
+          MSYS_NO_PATHCONV: "1"
         run: |
           set -euo pipefail
           check=target/debug/examples/tls_check.exe
