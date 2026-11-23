@@ -291,8 +291,8 @@ rdkafka = { version = "0.40", features = ["ssl"] }
 ```
 
 [`feat/tls-crypto-backends`]: https://github.com/j7nw4r/librdkafka/tree/feat/tls-crypto-backends
-[`docs/TLS-CRYPTO-BACKENDS.md`]: https://github.com/j7nw4r/librdkafka/blob/6e17126a58f426e259885337bba542f1053c4690/docs/TLS-CRYPTO-BACKENDS.md
-[`docs/SCHANNEL-ADAPTER.md`]: https://github.com/j7nw4r/librdkafka/blob/6e17126a58f426e259885337bba542f1053c4690/docs/SCHANNEL-ADAPTER.md
+[`docs/TLS-CRYPTO-BACKENDS.md`]: https://github.com/j7nw4r/librdkafka/blob/7959c0fb81a578ea3cca55c9064fd409775e9a88/docs/TLS-CRYPTO-BACKENDS.md
+[`docs/SCHANNEL-ADAPTER.md`]: https://github.com/j7nw4r/librdkafka/blob/7959c0fb81a578ea3cca55c9064fd409775e9a88/docs/SCHANNEL-ADAPTER.md
 [Microsoft identity platform certificate credentials]: https://learn.microsoft.com/en-us/entra/identity-platform/certificate-credentials
 
 [`build.rs`]: https://github.com/fede1024/rust-rdkafka/tree/master/rdkafka-sys/build.rs
