@@ -114,25 +114,35 @@ BCrypt/NCrypt. There is no OpenSSL. The build links `secur32`, `crypt32`,
     curl with OpenSSL. HTTPS trust comes from `https.ca.location` (a PEM
     file) or `https.ca.pem`, or from the Windows system store when both are
     unset. A CA directory and `https.ca.location=probe` fail.
-  * curl's Schannel backend checks certificate revocation, and librdkafka
-    does not turn that check off. The HTTPS server certificate must name a
+  * `https.revocation.check` controls certificate revocation checks for
+    HTTPS. With `default`, curl's Schannel backend checks revocation and
+    fails when the status is unknown, so the server certificate must name a
     CRL or OCSP location that the client can reach. On the windows-latest
     CI runner, a server certificate from a private CA without a CRL
     distribution point fails with `schannel: the revocation status is
-    unknown`.
-  * `builtin.features` includes `ssl`, `crypto`, `tls_schannel`,
-    `crypto_bcrypt` and `sasl_scram`, and also `http` and `oidc` with
-    `curl-static`.
+    unknown`. `best_effort` ignores missing or offline revocation
+    information (CI shows that the same certificate then passes), and
+    `none` turns the check off. Prefer `default` with a reachable CRL, or
+    `best_effort` for a private CA without one.
+  * `builtin.features` includes `ssl` (broker TLS), `auth_crypto`,
+    `tls_schannel`, `auth_crypto_bcrypt` and `sasl_scram`, and also `http`
+    and `oidc` with `curl-static`.
   * Schannel uses TLS 1.2 only. CA trust comes from `ssl.ca.location` or
-    `ssl.ca.pem`, or from the Windows system store when both are unset.
+    `ssl.ca.pem`, or from the Windows system store when both are unset or
+    when `ssl.ca.certificate.stores=Root`.
+  * OpenSSL-only properties, for example `ssl.key.password` or
+    `ssl.cipher.suites`, fail when you set them, with `OpenSSL-only; this
+    build uses Schannel TLS`.
   * For mTLS, the client identity must be a certificate with a private key in
-    a Windows store: `ssl.schannel.certificate=CurrentUser/My/<thumbprint>` or
-    `LocalMachine/My/<thumbprint>`, with the 40-hex SHA-1 thumbprint.
-    A PEM key from `ssl.key.location` or `ssl.key.pem` is imported in
-    memory, and Schannel can reject it. On the windows-latest CI runner,
-    client creation fails with `Schannel cannot use this ephemeral
-    private-key identity (0x8009030d)`. `ssl.schannel.certificate` cannot be
-    combined with those settings.
+    the Windows `My` store:
+    `ssl.certificate.store=CurrentUser/My/<thumbprint>` or
+    `LocalMachine/My/<thumbprint>`, with the 40-hex SHA-1 thumbprint. The
+    value can also use `\`, a `Cert:\` prefix, any letter case and spaces,
+    as PowerShell prints it. A PEM key from `ssl.key.location` or
+    `ssl.key.pem` is imported in memory, and Schannel can reject it. On the
+    windows-latest CI runner, client creation fails with `Schannel cannot use
+    this ephemeral private-key identity (0x8009030d)`.
+    `ssl.certificate.store` cannot be combined with those settings.
 
 ```sh
 cargo build --release --features schannel,libz-static --example tls_check
@@ -238,8 +248,8 @@ rdkafka = { version = "0.40", features = ["ssl"] }
 ```
 
 [`feat/tls-crypto-backends`]: https://github.com/j7nw4r/librdkafka/tree/feat/tls-crypto-backends
-[`docs/TLS-CRYPTO-BACKENDS.md`]: https://github.com/j7nw4r/librdkafka/blob/01b7b63228aa62a08332339ef93cae8a9812b59b/docs/TLS-CRYPTO-BACKENDS.md
-[`docs/SCHANNEL-ADAPTER.md`]: https://github.com/j7nw4r/librdkafka/blob/01b7b63228aa62a08332339ef93cae8a9812b59b/docs/SCHANNEL-ADAPTER.md
+[`docs/TLS-CRYPTO-BACKENDS.md`]: https://github.com/j7nw4r/librdkafka/blob/09579a05cd1b72fa76b3664a69235772c310b9a6/docs/TLS-CRYPTO-BACKENDS.md
+[`docs/SCHANNEL-ADAPTER.md`]: https://github.com/j7nw4r/librdkafka/blob/09579a05cd1b72fa76b3664a69235772c310b9a6/docs/SCHANNEL-ADAPTER.md
 [Microsoft identity platform certificate credentials]: https://learn.microsoft.com/en-us/entra/identity-platform/certificate-credentials
 
 [`build.rs`]: https://github.com/fede1024/rust-rdkafka/tree/master/rdkafka-sys/build.rs
