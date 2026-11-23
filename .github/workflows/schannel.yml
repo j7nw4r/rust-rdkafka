@@ -136,6 +136,16 @@ jobs:
             -X "https.ca.location=$dir/wrong-ca.pem" \
             -X sasl.oauthbearer.client.secret=tls-check-secret --expect-error "OAUTHBEARER token"
           test "$(wc -l < "$dir/requests.jsonl")" -eq "$requests"
+          echo "== server certificate without a CRL distribution point"
+          nocdp="$(cygpath -m "$RUNNER_TEMP")/oidc-no-cdp"
+          python .github/scripts/oidc_token_server.py --dir "$nocdp" --no-cdp > no-cdp.log 2>&1 &
+          trap 'kill $server $! || true; cat oidc-server.log "$dir/requests.jsonl" || true' EXIT
+          for _ in $(seq 1 60); do [ -f "$nocdp/token-url" ] && break; sleep 1; done
+          url=$(cat "$dir/token-url")
+          nocdp_url=$(cat "$nocdp/token-url")
+          $check --mode oauth "${oidc[@]/$url/$nocdp_url}" \
+            "${creds[@]}" -X "https.ca.location=$nocdp/ca.pem" \
+            -X sasl.oauthbearer.client.secret=tls-check-secret --expect-error "revocation"
           python - "$dir/requests.jsonl" <<'PY'
           import json, sys
           seen = [json.loads(line) for line in open(sys.argv[1])]
@@ -147,3 +157,114 @@ jobs:
           assert any(r["grant_type"] == "client_credentials" and not r["ok"] for r in seen)
           print("PASS: the endpoint saw every expected request")
           PY
+
+  # Kerberos through SSPI needs a domain and a KDC. This job checks only that
+  # the build selects the SSPI provider for GSSAPI.
+  schannel-gssapi:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lukka/get-cmake@latest
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.rust_version }}
+      - run: cargo build --features gssapi-sspi,libz-static --example tls_check
+      - name: GSSAPI client through SSPI
+        shell: bash
+        env:
+          MSYS_NO_PATHCONV: "1"
+        run: |
+          set -euo pipefail
+          check=target/debug/examples/tls_check.exe
+          $check --mode features --expect-features sasl,sasl_gssapi,tls_schannel,crypto_bcrypt
+          gssapi=(-X sasl.mechanisms=GSSAPI -X sasl.kerberos.service.name=kafka)
+          $check --mode create "${gssapi[@]}" -X security.protocol=sasl_plaintext \
+            -X debug=security --log-level 7 2>&1 | tee create.log
+          grep -F "Selected provider Win32 SSPI for SASL mechanism GSSAPI" create.log
+          $check --mode create "${gssapi[@]}" -X security.protocol=sasl_ssl
+          $check --mode metadata "${gssapi[@]}" -X security.protocol=sasl_plaintext \
+            -X bootstrap.servers=127.0.0.1:1 --timeout 5 --expect-error metadata
+
+  schannel-dynamic-linking:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lukka/get-cmake@latest
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.rust_version }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --quiet pefile
+      - run: cargo build --features schannel-dynamic-linking,libz-static --example tls_check
+      - name: Ship rdkafka.dll next to tls_check
+        shell: bash
+        run: cp target/debug/build/rdkafka-sys-*/out/bin/rdkafka.dll target/debug/examples/
+      - run: python .github/scripts/check_imports.py target/debug/examples/tls_check.exe rdkafka.dll
+      - run: >-
+          python .github/scripts/check_imports.py target/debug/examples/rdkafka.dll
+          bcrypt.dll ncrypt.dll crypt32.dll secur32.dll
+      - name: Offline tls_check checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          check=target/debug/examples/tls_check.exe
+          $check --mode features --expect-features ssl,crypto,tls_schannel,crypto_bcrypt,sasl_scram
+          $check --mode create -X security.protocol=sasl_ssl -X sasl.mechanisms=SCRAM-SHA-512 \
+            -X sasl.username=user -X sasl.password=secret
+          $check --mode metadata -X security.protocol=ssl -X bootstrap.servers=127.0.0.1:1 \
+            --timeout 5 --expect-error metadata
+      - run: cargo test --features schannel-dynamic-linking,libz-static
+        working-directory: rdkafka-sys
+
+  schannel-static-linking:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: lukka/get-cmake@latest
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.rust_version }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --quiet pefile
+      - name: Build and install static librdkafka builds
+        shell: bash
+        run: |
+          set -euo pipefail
+          build() {
+            cmake -S rdkafka-sys/librdkafka -B "build-$1" -DRDKAFKA_TLS_BACKEND=$2 \
+              -DRDKAFKA_CRYPTO_BACKEND=$3 -DRDKAFKA_BUILD_STATIC=ON -DWITH_SASL=ON \
+              -DWITH_CURL=OFF -DWITH_ZLIB=OFF -DWITH_ZSTD=OFF -DENABLE_LZ4_EXT=OFF \
+              -DRDKAFKA_BUILD_TESTS=OFF -DRDKAFKA_BUILD_EXAMPLES=OFF
+            cmake --build "build-$1" --config Release --parallel
+            cmake --install "build-$1" --config Release --prefix "$RUNNER_TEMP/rdkafka-$1"
+          }
+          build schannel schannel bcrypt
+          build none none none
+      - name: Link the prebuilt Schannel library
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DEP_LIBRDKAFKA_STATIC_ROOT="$RUNNER_TEMP/rdkafka-schannel"
+          cargo build --no-default-features --features schannel-static-linking --example tls_check
+          check=target/debug/examples/tls_check.exe
+          $check --mode features --expect-features ssl,crypto,tls_schannel,crypto_bcrypt,sasl_scram
+          $check --mode metadata -X security.protocol=ssl -X bootstrap.servers=127.0.0.1:1 \
+            --timeout 5 --expect-error metadata
+          python .github/scripts/check_imports.py $check bcrypt.dll ncrypt.dll crypt32.dll secur32.dll
+          cd rdkafka-sys
+          cargo test --no-default-features --features schannel-static-linking
+      - name: Refuse a prebuilt library without Schannel
+        shell: bash
+        run: |
+          export DEP_LIBRDKAFKA_STATIC_ROOT="$RUNNER_TEMP/rdkafka-none"
+          if cargo build --no-default-features --features schannel-static-linking \
+            --example tls_check > refuse.log 2>&1; then
+            echo "FAIL: a build without Schannel was linked"; exit 1
+          fi
+          grep -F "is not a static Schannel and BCrypt librdkafka" refuse.log

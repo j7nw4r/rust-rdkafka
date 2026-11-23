@@ -3,7 +3,7 @@
 It makes a private CA, an HTTPS server certificate for localhost, a second
 unrelated CA, and RS256/ES256 assertion keys. It serves POST /token over
 HTTPS and the CA's CRL over plain HTTP, so that Schannel can check
-revocation. Each token request is appended to requests.jsonl. A
+revocation. With --no-cdp the server certificate names no CRL. Each token request is appended to requests.jsonl. A
 client_credentials request must use the test client id and secret. A
 jwt-bearer assertion must carry a valid signature from one of the assertion
 keys. A valid request gets an unsigned access token with `sub` and `exp`.
@@ -45,7 +45,7 @@ def pem_key(key):
                              serialization.NoEncryption())
 
 
-def make_credentials(out, crl_url):
+def make_credentials(out, crl_url, cdp):
     now = dt.datetime.now(dt.timezone.utc)
     start, end = now - dt.timedelta(hours=1), now + dt.timedelta(days=2)
 
@@ -68,18 +68,18 @@ def make_credentials(out, crl_url):
     other = ca_cert("tls-check unrelated CA", other_key)
 
     server_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    cdp = x509.CRLDistributionPoints([x509.DistributionPoint(
-        [x509.UniformResourceIdentifier(crl_url)], None, None, None)])
     server = (x509.CertificateBuilder().subject_name(name("localhost")).issuer_name(ca.subject)
               .public_key(server_key.public_key()).serial_number(x509.random_serial_number())
               .not_valid_before(start).not_valid_after(end)
               .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
               .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), False)
               .add_extension(x509.SubjectAlternativeName([x509.DNSName("localhost")]), False)
-              .add_extension(cdp, False)
               .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(
-                  ca_key.public_key()), False)
-              .sign(ca_key, hashes.SHA256()))
+                  ca_key.public_key()), False))
+    if cdp:
+        server = server.add_extension(x509.CRLDistributionPoints([x509.DistributionPoint(
+            [x509.UniformResourceIdentifier(crl_url)], None, None, None)]), False)
+    server = server.sign(ca_key, hashes.SHA256())
     crl = (x509.CertificateRevocationListBuilder().issuer_name(ca.subject)
            .last_update(start).next_update(end).sign(ca_key, hashes.SHA256()))
 
@@ -116,6 +116,7 @@ def verify_assertion(assertion, rs256, es256):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dir", required=True, type=pathlib.Path)
+    parser.add_argument("--no-cdp", action="store_true")
     args = parser.parse_args()
     out = args.dir
     out.mkdir(parents=True, exist_ok=True)
@@ -167,7 +168,7 @@ def main():
 
     crl_server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), CrlHandler)
     crl_url = f"http://127.0.0.1:{crl_server.server_address[1]}/ca.crl"
-    state["crl"], state["rs256"], state["es256"] = make_credentials(out, crl_url)
+    state["crl"], state["rs256"], state["es256"] = make_credentials(out, crl_url, not args.no_cdp)
 
     token_server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), TokenHandler)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
