@@ -371,6 +371,12 @@ fn build_librdkafka() {
     if env::var("CARGO_FEATURE_SCHANNEL").is_ok() {
         config.define("RDKAFKA_TLS_BACKEND", "schannel");
         config.define("RDKAFKA_CRYPTO_BACKEND", "bcrypt");
+        if needs_curl() {
+            // With WITHOUT_WIN32_CONFIG, librdkafka's CMake passes no
+            // WITH_CURL or WITH_OAUTHBEARER_OIDC define, so HTTP and OIDC
+            // would compile out although curl is linked.
+            config.cflag("-DWITH_CURL=1 -DWITH_OAUTHBEARER_OIDC=1");
+        }
     }
 
     if let Ok(system_name) = env::var("CMAKE_SYSTEM_NAME") {
