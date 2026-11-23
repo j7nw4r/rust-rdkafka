@@ -177,6 +177,15 @@ jobs:
         with:
           toolchain: ${{ env.rust_version }}
       - run: cargo build --features schannel,libz-static --example tls_check
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --quiet pefile
+      # GSSAPI passes a wide target name, so it must call the W functions.
+      - run: >-
+          python .github/scripts/check_imports.py target/debug/examples/tls_check.exe
+          secur32.dll:InitializeSecurityContextW secur32.dll:AcquireCredentialsHandleW
+          "!secur32.dll:InitializeSecurityContextA"
       - name: GSSAPI client through SSPI
         shell: bash
         env:
