@@ -182,8 +182,8 @@ cargo build --no-default-features --features schannel-static-linking
 ```
 
 [`feat/tls-crypto-backends`]: https://github.com/j7nw4r/librdkafka/tree/feat/tls-crypto-backends
-[`docs/TLS-CRYPTO-BACKENDS.md`]: https://github.com/j7nw4r/librdkafka/blob/32a4e8ec3374afb63c58fd4391cf67eced0f14ee/docs/TLS-CRYPTO-BACKENDS.md
-[`docs/SCHANNEL-ADAPTER.md`]: https://github.com/j7nw4r/librdkafka/blob/32a4e8ec3374afb63c58fd4391cf67eced0f14ee/docs/SCHANNEL-ADAPTER.md
+[`docs/TLS-CRYPTO-BACKENDS.md`]: https://github.com/j7nw4r/librdkafka/blob/01b7b63228aa62a08332339ef93cae8a9812b59b/docs/TLS-CRYPTO-BACKENDS.md
+[`docs/SCHANNEL-ADAPTER.md`]: https://github.com/j7nw4r/librdkafka/blob/01b7b63228aa62a08332339ef93cae8a9812b59b/docs/SCHANNEL-ADAPTER.md
 
 [`build.rs`]: https://github.com/fede1024/rust-rdkafka/tree/master/rdkafka-sys/build.rs
 [Apache Kafka]: https://kafka.apache.org
