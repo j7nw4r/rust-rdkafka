@@ -146,24 +146,49 @@ service that does not allow CreateTopics. Run it with `--help` for the other
 modes and options. It needs no Windows-specific
 code, so it also builds without `schannel`.
 
-#### Windows alternatives to `gssapi`, `dynamic-linking` and `static-linking`
+#### Kerberos (SASL GSSAPI)
+
+On Windows, librdkafka always compiles SASL GSSAPI through SSPI, and the
+`schannel` build always includes it, with the credentials of the logged-on
+user. There is no separate feature, because librdkafka has no build option
+that removes SSPI Kerberos on Windows. Use `sasl.mechanisms=GSSAPI` and set
+`sasl.kerberos.service.name`. The `gssapi` feature (Cyrus SASL and OpenSSL)
+conflicts with `schannel`. CI checks only that librdkafka selects the
+`Win32 SSPI` provider. Kerberos against a real KDC or Active Directory has
+not been tested.
+
+#### OAuth with Microsoft Entra ID
+
+With `curl`, librdkafka's built-in OIDC handler fetches tokens over HTTPS
+(`sasl.oauthbearer.method=oidc`). Its built-in JWT-bearer grant sends
+`grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer` and `assertion=`,
+signs with RS256 or ES256, and reads the key from an unencrypted PKCS#8 PEM
+(`sasl.oauthbearer.assertion.private.key.file` or `.pem`). Entra
+certificate credentials use a different form: `grant_type=client_credentials`
+with `client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer`
+and `client_assertion=`, signed with PS256 and with an `x5t#S256` header (see
+[Microsoft identity platform certificate credentials]). For Entra
+certificate authentication, make the token in your application: implement
+`ClientContext::generate_oauth_token` and set
+`ClientContext::ENABLE_REFRESH_OAUTH_TOKEN` to `true`. For an Azure managed
+identity, librdkafka can fetch the token itself with
+`sasl.oauthbearer.metadata.authentication.type=azure_imds` and `curl`. This
+crate has not tested either Entra route.
+
+#### Windows alternatives to `dynamic-linking` and `static-linking`
 
 These features conflict with `schannel`. Each of the features below enables
 `schannel` and fails on a target that is not Windows.
 
-  * **`gssapi-sspi`**: SASL GSSAPI (Kerberos) through Windows SSPI, with the
-    credentials of the logged-on user. It needs no Cyrus SASL or OpenSSL.
-    The `schannel` build already includes SSPI, so this feature is an
-    explicit request for it: the build fails unless librdkafka was built
-    with `WITH_SASL`. Set `sasl.mechanisms=GSSAPI` and
-    `sasl.kerberos.service.name`. CI checks only that librdkafka selects the
-    `Win32 SSPI` provider. Kerberos against a real KDC or Active Directory
-    has not been tested.
-  * **`schannel-dynamic-linking`**: builds librdkafka as `rdkafka.dll` with
-    the same Schannel and BCrypt settings and links it dynamically. The
-    build checks the generated `config.h`. `cargo run` and `cargo test`
-    find the DLL in `target/<profile>/build/rdkafka-sys-*/out/bin`. To run
-    the binary in another way, put `rdkafka.dll` next to the `.exe`.
+  * **`schannel-dll`**: builds librdkafka as `rdkafka.dll` in the build
+    script's `OUT_DIR`, with the same Schannel and BCrypt settings, and links
+    it dynamically. Unlike `dynamic-linking`, it does not use an installed
+    librdkafka. The build checks the generated `config.h` and prints the
+    DLL path as a cargo warning
+    (`target/<profile>/build/rdkafka-sys-*/out/bin/rdkafka.dll`). `cargo run`
+    and `cargo test` find the DLL there. To deploy the binary, copy
+    `rdkafka.dll` into the same directory as the `.exe`. Windows loads a DLL
+    from the directory of the application before it searches `PATH`.
   * **`schannel-static-linking`**: links a prebuilt static librdkafka
     instead of building one. Set `DEP_LIBRDKAFKA_STATIC_ROOT` to its CMake
     install prefix, which must have `lib/rdkafka.lib`. The build reads the
@@ -173,19 +198,49 @@ These features conflict with `schannel`. Each of the features below enables
     CMake settings as the `schannel` feature and `RDKAFKA_BUILD_STATIC=ON`.
     If it uses zlib, zstd or curl, also link those libraries.
 
-```sh
-cmake -S rdkafka-sys/librdkafka -B build -DRDKAFKA_TLS_BACKEND=schannel \
-  -DRDKAFKA_CRYPTO_BACKEND=bcrypt -DRDKAFKA_BUILD_STATIC=ON -DWITH_SASL=ON \
+```bat
+cmake -S rdkafka-sys\librdkafka -B build -DRDKAFKA_TLS_BACKEND=schannel ^
+  -DRDKAFKA_CRYPTO_BACKEND=bcrypt -DRDKAFKA_BUILD_STATIC=ON -DWITH_SASL=ON ^
   -DWITH_CURL=OFF -DWITH_ZLIB=OFF -DWITH_ZSTD=OFF -DENABLE_LZ4_EXT=OFF
 cmake --build build --config Release
-cmake --install build --config Release --prefix C:/rdkafka-schannel
-set DEP_LIBRDKAFKA_STATIC_ROOT=C:/rdkafka-schannel
-cargo build --no-default-features --features schannel-static-linking
+cmake --install build --config Release --prefix C:\rdkafka-schannel
+set DEP_LIBRDKAFKA_STATIC_ROOT=C:\rdkafka-schannel
+cargo build --no-default-features --features schannel-static-linking,tokio
+```
+
+`--no-default-features` removes `libz`, because this prebuilt library has no
+zlib, and it also removes `tokio`. Add `tokio` back if you use
+`FutureProducer` or `StreamConsumer` with the Tokio runtime.
+
+#### Costs of the exclusive features
+
+`schannel` and its variants conflict with other features, and Cargo unifies
+features across the whole dependency graph:
+
+  * `cargo build --all-features` and `cargo test --all-features` fail on
+    every operating system, so tools that use all features (CI matrices,
+    rust-analyzer settings) need an explicit feature list.
+  * On Windows, the build fails if any crate in the graph enables
+    `rdkafka/ssl` or `rdkafka-sys/ssl` (or `gssapi`, `dynamic-linking` or
+    `static-linking`).
+
+Select the TLS feature for each target. Cargo's feature resolver version 2
+does not enable features from a target-specific dependency table when it
+builds for another target. Resolver 2 is the default for `edition = "2021"`
+packages. A virtual workspace must set `resolver = "2"` in `[workspace]`.
+
+```toml
+[target.'cfg(windows)'.dependencies]
+rdkafka = { version = "0.40", features = ["schannel", "libz-static"] }
+
+[target.'cfg(not(windows))'.dependencies]
+rdkafka = { version = "0.40", features = ["ssl"] }
 ```
 
 [`feat/tls-crypto-backends`]: https://github.com/j7nw4r/librdkafka/tree/feat/tls-crypto-backends
 [`docs/TLS-CRYPTO-BACKENDS.md`]: https://github.com/j7nw4r/librdkafka/blob/01b7b63228aa62a08332339ef93cae8a9812b59b/docs/TLS-CRYPTO-BACKENDS.md
 [`docs/SCHANNEL-ADAPTER.md`]: https://github.com/j7nw4r/librdkafka/blob/01b7b63228aa62a08332339ef93cae8a9812b59b/docs/SCHANNEL-ADAPTER.md
+[Microsoft identity platform certificate credentials]: https://learn.microsoft.com/en-us/entra/identity-platform/certificate-credentials
 
 [`build.rs`]: https://github.com/fede1024/rust-rdkafka/tree/master/rdkafka-sys/build.rs
 [Apache Kafka]: https://kafka.apache.org

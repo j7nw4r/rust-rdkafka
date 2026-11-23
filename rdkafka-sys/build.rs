@@ -142,12 +142,10 @@ fn check_schannel_features() {
         process::exit(1);
     }
 
-    if env::var("CARGO_FEATURE_SCHANNEL_DYNAMIC_LINKING").is_ok()
+    if env::var("CARGO_FEATURE_SCHANNEL_DLL").is_ok()
         && env::var("CARGO_FEATURE_SCHANNEL_STATIC_LINKING").is_ok()
     {
-        eprintln!(
-            "error: `schannel-dynamic-linking` and `schannel-static-linking` cannot be combined"
-        );
+        eprintln!("error: `schannel-dll` and `schannel-static-linking` cannot be combined");
         process::exit(1);
     }
 
@@ -347,7 +345,7 @@ fn build_librdkafka() {
     let mut config = cmake::Config::new("librdkafka");
     let mut cmake_library_paths = vec![];
     let schannel = env::var("CARGO_FEATURE_SCHANNEL").is_ok();
-    let dll = env::var("CARGO_FEATURE_SCHANNEL_DYNAMIC_LINKING").is_ok();
+    let dll = env::var("CARGO_FEATURE_SCHANNEL_DLL").is_ok();
 
     config
         .define("RDKAFKA_BUILD_STATIC", if dll { "0" } else { "1" })
@@ -470,16 +468,16 @@ fn build_librdkafka() {
 
     println!("cargo:rustc-link-search=native={}/lib", dst.display());
     if schannel {
-        let mut required = vec!["WITH_SCHANNEL", "WITH_CRYPTO_BCRYPT"];
-        if env::var("CARGO_FEATURE_GSSAPI_SSPI").is_ok() {
-            required.push("WITH_SASL");
-        }
-        require_config(&dst, &required);
+        require_config(&dst, &["WITH_SCHANNEL", "WITH_CRYPTO_BCRYPT", "WITH_SASL"]);
     }
     if dll {
         // rdkafka.dll is in bin. Cargo adds link search paths inside the
         // target directory to PATH for `cargo run` and `cargo test`.
         println!("cargo:rustc-link-search=native={}/bin", dst.display());
+        println!(
+            "cargo:warning=built {}; ship it next to the .exe",
+            dst.join("bin").join("rdkafka.dll").display()
+        );
         println!("cargo:rustc-link-lib=dylib=rdkafka");
         return;
     }

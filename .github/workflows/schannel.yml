@@ -159,7 +159,7 @@ jobs:
           PY
 
   # Kerberos through SSPI needs a domain and a KDC. This job checks only that
-  # the build selects the SSPI provider for GSSAPI.
+  # a schannel build selects the SSPI provider for GSSAPI.
   schannel-gssapi:
     runs-on: windows-latest
     steps:
@@ -168,7 +168,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.rust_version }}
-      - run: cargo build --features gssapi-sspi,libz-static --example tls_check
+      - run: cargo build --features schannel,libz-static --example tls_check
       - name: GSSAPI client through SSPI
         shell: bash
         env:
@@ -185,7 +185,7 @@ jobs:
           $check --mode metadata "${gssapi[@]}" -X security.protocol=sasl_plaintext \
             -X bootstrap.servers=127.0.0.1:1 --timeout 5 --expect-error metadata
 
-  schannel-dynamic-linking:
+  schannel-dll:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -197,10 +197,26 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install --quiet pefile
-      - run: cargo build --features schannel-dynamic-linking,libz-static --example tls_check
-      - name: Ship rdkafka.dll next to tls_check
+      - name: Build tls_check and ship rdkafka.dll next to it
         shell: bash
-        run: cp target/debug/build/rdkafka-sys-*/out/bin/rdkafka.dll target/debug/examples/
+        run: |
+          set -euo pipefail
+          cargo build --features schannel-dll,libz-static --example tls_check \
+            --message-format=json > build.json
+          # Take the DLL from this build's OUT_DIR, not from a glob over old ones.
+          dll=$(python - build.json <<'PY'
+          import json, sys
+          outs = set()
+          for line in open(sys.argv[1]):
+              message = json.loads(line)
+              if (message.get("reason") == "build-script-executed"
+                      and "rdkafka-sys" in message["package_id"]):
+                  outs.add(message["out_dir"])
+          assert len(outs) == 1, outs
+          print(outs.pop() + "/bin/rdkafka.dll")
+          PY
+          )
+          cp "$dll" target/debug/examples/
       - run: python .github/scripts/check_imports.py target/debug/examples/tls_check.exe rdkafka.dll
       - run: >-
           python .github/scripts/check_imports.py target/debug/examples/rdkafka.dll
@@ -215,7 +231,7 @@ jobs:
             -X sasl.username=user -X sasl.password=secret
           $check --mode metadata -X security.protocol=ssl -X bootstrap.servers=127.0.0.1:1 \
             --timeout 5 --expect-error metadata
-      - run: cargo test --features schannel-dynamic-linking,libz-static
+      - run: cargo test --features schannel-dll,libz-static
         working-directory: rdkafka-sys
 
   schannel-static-linking:

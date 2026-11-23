@@ -4,9 +4,9 @@ See also the [rdkafka-sys changelog](rdkafka-sys/changelog.md).
 
 ## Unreleased
 
-* Add the experimental, Windows-only `schannel`, `gssapi-sspi`,
-  `schannel-dynamic-linking` and `schannel-static-linking` features,
-  re-exports of the new `rdkafka-sys` features.
+* Add the experimental, Windows-only `schannel`, `schannel-dll` and
+  `schannel-static-linking` features, re-exports of the new `rdkafka-sys`
+  features.
 * Add the `tls_check` example. It takes `-X` librdkafka properties and checks
   a broker with a produce/consume roundtrip or a metadata request. Its
   `oauth` mode checks that the built-in OIDC handler gets a token, and

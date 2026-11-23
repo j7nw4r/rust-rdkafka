@@ -8,10 +8,10 @@
   links `secur32`, `crypt32`, `bcrypt`, `ncrypt` and `ws2_32`. The build
   fails on other targets, and with `ssl`, `gssapi`, `dynamic-linking` or
   `static-linking`.
-* Add the experimental, Windows-only `gssapi-sspi`,
-  `schannel-dynamic-linking` and `schannel-static-linking` features. They
-  give SASL GSSAPI through SSPI, a Schannel `rdkafka.dll`, and a checked
-  prebuilt static Schannel librdkafka.
+* Add the experimental, Windows-only `schannel-dll` and
+  `schannel-static-linking` features. They build a Schannel `rdkafka.dll`
+  and link a checked prebuilt static Schannel librdkafka. SASL GSSAPI
+  through SSPI is always part of a `schannel` build.
 * Allow `curl-static` with `schannel` for SASL OAUTHBEARER OIDC. curl-sys
   builds curl with Schannel on Windows. The build fails if curl-sys links a
   system or vcpkg libcurl instead.
