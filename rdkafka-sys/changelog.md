@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+* Use librdkafka from the experimental `feat/tls-crypto-backends` branch of
+  j7nw4r/librdkafka (v2.16.0 with build-selected TLS and crypto backends).
+  It names the store identity property `ssl.certificate.store`, adds
+  `https.revocation.check`, reports `auth_crypto` and `auth_crypto_bcrypt`
+  in `builtin.features`, and calls the wide SSPI functions for SASL GSSAPI
+  on Windows.
+* Add the experimental, Windows-only `schannel` feature. It builds a static
+  librdkafka with Schannel TLS, BCrypt crypto and SASL (including SCRAM), and
+  links `secur32`, `crypt32`, `bcrypt`, `ncrypt` and `ws2_32`. The build
+  fails on other targets, and with `ssl`, `gssapi`, `dynamic-linking` or
+  `static-linking`.
+* Add the experimental, Windows-only `schannel-dll` and
+  `schannel-static-linking` features. They build a Schannel `rdkafka.dll`
+  and link a checked prebuilt static Schannel librdkafka. SASL GSSAPI
+  through SSPI is always part of a `schannel` build.
+* Allow `curl-static` with `schannel` for SASL OAUTHBEARER OIDC. curl-sys
+  builds curl with Schannel on Windows. The build fails if curl-sys links a
+  system or vcpkg libcurl instead.
+
 ## v4.11.0+2.16.0 (2026-11-21)
 * Bump librdkafka to v2.16.0 ([#865]).
 * Add the `RDKafkaErrorCode` variants that librdkafka added since v2.12.1:

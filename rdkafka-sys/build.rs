@@ -40,6 +40,10 @@ where
 }
 
 fn main() {
+    if env::var("CARGO_FEATURE_SCHANNEL").is_ok() {
+        check_schannel_features();
+    }
+
     if env::var("CARGO_FEATURE_DYNAMIC_LINKING").is_ok() {
         eprintln!("librdkafka will be linked dynamically");
 
@@ -85,6 +89,8 @@ fn main() {
             process::exit(1);
         }
         eprintln!("librdkafka will be linked statically using prebuilt binaries");
+    } else if env::var("CARGO_FEATURE_SCHANNEL_STATIC_LINKING").is_ok() {
+        link_prebuilt_schannel();
     } else {
         // Ensure that we are in the right directory
         let rdkafkasys_root = Path::new("rdkafka-sys");
@@ -97,6 +103,122 @@ fn main() {
         }
         eprintln!("Building and linking librdkafka statically");
         build_librdkafka();
+    }
+}
+
+fn check_schannel_features() {
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if target_os != "windows" {
+        eprintln!(
+            "error: the `schannel` feature requires a Windows target, but the target OS is `{}`. \
+             Schannel TLS and BCrypt crypto are Windows APIs.",
+            target_os
+        );
+        process::exit(1);
+    }
+
+    // A Schannel build has no OpenSSL. The features below add OpenSSL, Cyrus
+    // SASL, or a librdkafka that this crate does not build.
+    let conflicts: Vec<&str> = [
+        ("SSL", "ssl"),
+        ("GSSAPI", "gssapi"),
+        ("DYNAMIC_LINKING", "dynamic-linking"),
+        ("STATIC_LINKING", "static-linking"),
+    ]
+    .iter()
+    .filter(|(var, _)| env::var(format!("CARGO_FEATURE_{}", var)).is_ok())
+    .map(|(_, feature)| *feature)
+    .collect();
+    if !conflicts.is_empty() {
+        eprintln!(
+            "error: the `schannel` feature cannot be combined with these features: {}",
+            conflicts.join(", ")
+        );
+        eprintln!(
+            "The `schannel` feature builds a static librdkafka with Schannel TLS and BCrypt \
+             crypto, without OpenSSL. `ssl-vendored`, `gssapi-vendored` and `sasl` enable \
+             `ssl` or `gssapi`."
+        );
+        process::exit(1);
+    }
+
+    if env::var("CARGO_FEATURE_SCHANNEL_DLL").is_ok()
+        && env::var("CARGO_FEATURE_SCHANNEL_STATIC_LINKING").is_ok()
+    {
+        eprintln!("error: `schannel-dll` and `schannel-static-linking` cannot be combined");
+        process::exit(1);
+    }
+
+    // curl-sys builds its bundled curl with Schannel on Windows. A system or
+    // vcpkg libcurl can use OpenSSL, and curl-sys does not report its backend.
+    if needs_curl() && env::var("DEP_CURL_STATIC").as_deref() != Ok("1") {
+        eprintln!(
+            "error: the `schannel` feature needs the curl that curl-sys builds with Schannel, \
+             but curl-sys linked a system or vcpkg libcurl. Enable `curl-static`."
+        );
+        process::exit(1);
+    }
+}
+
+const SCHANNEL_NATIVE_LIBS: [&str; 5] = ["secur32", "crypt32", "bcrypt", "ncrypt", "ws2_32"];
+
+/// Links a prebuilt static librdkafka from DEP_LIBRDKAFKA_STATIC_ROOT, after a
+/// check that it is a Schannel and BCrypt build.
+fn link_prebuilt_schannel() {
+    println!("cargo:rerun-if-env-changed=DEP_LIBRDKAFKA_STATIC_ROOT");
+    let Ok(root) = env::var("DEP_LIBRDKAFKA_STATIC_ROOT") else {
+        eprintln!(
+            "error: `schannel-static-linking` needs DEP_LIBRDKAFKA_STATIC_ROOT, the install \
+             prefix of a static Schannel and BCrypt librdkafka"
+        );
+        process::exit(1);
+    };
+    let lib_dir = Path::new(&root).join("lib");
+    let archive = lib_dir.join("rdkafka.lib");
+    println!("cargo:rerun-if-changed={}", archive.display());
+    let bytes = std::fs::read(&archive).unwrap_or_else(|err| {
+        eprintln!("error: cannot read {}: {}", archive.display(), err);
+        process::exit(1);
+    });
+    // A static archive names its object files. An import library for
+    // rdkafka.dll names none of them, and an OpenSSL build has rdkafka_ssl.
+    let has = |object: &str| bytes.windows(object.len()).any(|w| w == object.as_bytes());
+    let schannel = has("rdkafka_schannel.") && has("rdkafka_crypto_bcrypt.");
+    if !schannel || has("rdkafka_ssl.") {
+        eprintln!(
+            "error: {} is not a static Schannel and BCrypt librdkafka. Build it with \
+             RDKAFKA_TLS_BACKEND=schannel, RDKAFKA_CRYPTO_BACKEND=bcrypt and \
+             RDKAFKA_BUILD_STATIC=ON.",
+            archive.display()
+        );
+        process::exit(1);
+    }
+    eprintln!(
+        "Linking the prebuilt static Schannel librdkafka in {}",
+        root
+    );
+    println!("cargo:rustc-link-search=native={}", lib_dir.display());
+    println!("cargo:rustc-link-lib=static=rdkafka");
+    for lib in SCHANNEL_NATIVE_LIBS {
+        println!("cargo:rustc-link-lib={}", lib);
+    }
+    println!("cargo:root={}", root);
+}
+
+/// Exits unless each `#define NAME 1` is in librdkafka's generated config.h.
+#[cfg(feature = "cmake-build")]
+fn require_config(dst: &Path, names: &[&str]) {
+    let path = dst.join("build/generated/config.h");
+    let config = fs::read_to_string(&path)
+        .unwrap_or_else(|err| panic!("Cannot read {}: {}", path.display(), err));
+    for name in names {
+        let on = config
+            .lines()
+            .any(|line| line.split_whitespace().collect::<Vec<_>>() == ["#define", name, "1"]);
+        if !on {
+            eprintln!("error: {} is not 1 in {}", name, path.display());
+            process::exit(1);
+        }
     }
 }
 
@@ -222,9 +344,11 @@ fn build_librdkafka() {
 fn build_librdkafka() {
     let mut config = cmake::Config::new("librdkafka");
     let mut cmake_library_paths = vec![];
+    let schannel = env::var("CARGO_FEATURE_SCHANNEL").is_ok();
+    let dll = env::var("CARGO_FEATURE_SCHANNEL_DLL").is_ok();
 
     config
-        .define("RDKAFKA_BUILD_STATIC", "1")
+        .define("RDKAFKA_BUILD_STATIC", if dll { "0" } else { "1" })
         .define("RDKAFKA_BUILD_TESTS", "0")
         .define("RDKAFKA_BUILD_EXAMPLES", "0")
         // CMAKE_INSTALL_LIBDIR is inferred as "lib64" on some platforms, but we
@@ -298,7 +422,8 @@ fn build_librdkafka() {
             env::set_var("PKG_CONFIG_PATH", new_pkg_config_path);
         }
     } else {
-        config.define("WITH_SASL", "0");
+        // On Windows, WITH_SASL adds SASL/SCRAM with the BCrypt backend.
+        config.define("WITH_SASL", if schannel { "1" } else { "0" });
     }
 
     if env::var("CARGO_FEATURE_ZSTD").is_ok() {
@@ -313,6 +438,11 @@ fn build_librdkafka() {
         config.register_dep("lz4");
     } else {
         config.define("ENABLE_LZ4_EXT", "0");
+    }
+
+    if schannel {
+        config.define("RDKAFKA_TLS_BACKEND", "schannel");
+        config.define("RDKAFKA_CRYPTO_BACKEND", "bcrypt");
     }
 
     if let Ok(system_name) = env::var("CMAKE_SYSTEM_NAME") {
@@ -331,5 +461,25 @@ fn build_librdkafka() {
     let dst = config.build();
 
     println!("cargo:rustc-link-search=native={}/lib", dst.display());
+    if schannel {
+        require_config(&dst, &["WITH_SCHANNEL", "WITH_CRYPTO_BCRYPT", "WITH_SASL"]);
+    }
+    if dll {
+        // rdkafka.dll is in bin. Cargo adds link search paths inside the
+        // target directory to PATH for `cargo run` and `cargo test`.
+        println!("cargo:rustc-link-search=native={}/bin", dst.display());
+        println!(
+            "cargo:warning=built {}; ship it next to the .exe",
+            dst.join("bin").join("rdkafka.dll").display()
+        );
+        println!("cargo:rustc-link-lib=dylib=rdkafka");
+        return;
+    }
     println!("cargo:rustc-link-lib=static=rdkafka");
+    if schannel {
+        // A static library does not carry its CMake link dependencies.
+        for lib in SCHANNEL_NATIVE_LIBS {
+            println!("cargo:rustc-link-lib={}", lib);
+        }
+    }
 }

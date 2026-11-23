@@ -56,6 +56,23 @@ ssl = ["openssl-sys"]
 # crate.
 ssl-vendored = ["ssl", "openssl-sys/vendored"]
 
+# Experimental, Windows only. Use Schannel for broker TLS and BCrypt for SASL
+# SCRAM and other authentication crypto, with no OpenSSL. SASL GSSAPI uses
+# Windows SSPI. Builds librdkafka statically with CMake. Conflicts with `ssl`,
+# `gssapi`, `dynamic-linking` and `static-linking`; `curl` needs the curl that
+# curl-sys builds.
+schannel = ["cmake-build"]
+
+# Experimental, Windows only. Like `schannel`, but builds librdkafka as
+# rdkafka.dll in OUT_DIR and links it dynamically. Ship rdkafka.dll with the
+# binary. This does not link an installed librdkafka like `dynamic-linking`.
+schannel-dll = ["schannel"]
+
+# Experimental, Windows only. Links a prebuilt static Schannel and BCrypt
+# librdkafka from the install prefix in DEP_LIBRDKAFKA_STATIC_ROOT, after a
+# check of its object files, instead of building one.
+schannel-static-linking = ["schannel"]
+
 # Enable SASL GSSAPI support with Cyrus libsasl2.
 gssapi = ["ssl", "sasl2-sys"]
 

@@ -127,6 +127,8 @@ your executable. To compile librdkafka you'll need:
 * `libsasl2-dev`: optional, *not* included by default (feature: `gssapi`)
 * `libcurl-dev` (e.g. `libcurl4-openssl-dev` on Ubuntu): optional, *not* included by default (feature: `curl`)
 * `libzstd-dev`: optional, *not* included by default (feature: `zstd-pkg-config`)
+* Windows Schannel and BCrypt: optional, experimental, Windows only, *not*
+  included by default (feature: `schannel`; needs `cmake`)
 
 Note that using the CMake build system, via the `cmake-build` feature, is
 encouraged if you can take the dependency on CMake.
@@ -144,6 +146,15 @@ rdkafka = { version = "0.40", features = ["dynamic-linking"] }
 If you'd like to compile librdkafka statically yourself, you can use
 `static-linking` while supplying `DEP_LIBRDKAFKA_STATIC_ROOT` with the path
 to where librdkafka was built.
+
+On Windows, the experimental `schannel` feature uses Schannel for broker TLS
+and BCrypt for SASL SCRAM crypto, with no OpenSSL. For mTLS, the client
+certificate and key must be in a Windows store. SASL GSSAPI uses Windows
+SSPI. `schannel-dll` and `schannel-static-linking` are its Windows
+alternatives to `dynamic-linking` and `static-linking`. These features
+conflict with `ssl`, so `--all-features` fails; select the TLS feature for
+each target with `[target.'cfg(windows)'.dependencies]`. Read [Schannel and
+BCrypt][rdkafka-sys-schannel] before you use them.
 
 For a full listing of features, consult the [rdkafka-sys crate's
 documentation][rdkafka-sys-features]. All of rdkafka-sys features are
@@ -230,6 +241,7 @@ logging framework.
 [message delivery semantics]: https://kafka.apache.org/documentation/#semantics
 [producer-transactions]: https://docs.rs/rdkafka/*/rdkafka/producer/#transactions
 [rdkafka-sys-features]: https://github.com/fede1024/rust-rdkafka/tree/master/rdkafka-sys/README.md#features
+[rdkafka-sys-schannel]: https://github.com/fede1024/rust-rdkafka/tree/master/rdkafka-sys/README.md#schannel-and-bcrypt-experimental-windows-only
 [Tokio]: https://tokio.rs/
 
 ## rdkafka-sys
