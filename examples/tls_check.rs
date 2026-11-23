@@ -370,7 +370,9 @@ fn main() {
     match matches.get_one::<String>("mode").unwrap().as_str() {
         "features" => {}
         "create" => {
-            let _producer: BaseProducer<CheckContext> = check.client(&[]);
+            let producer: BaseProducer<CheckContext> = check.client(&[]);
+            // Logs go to the main queue, so serve the ones from creation.
+            producer.poll(Duration::from_millis(500));
             check.succeeded("client creation");
             println!("client created");
         }
