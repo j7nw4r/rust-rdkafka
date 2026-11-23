@@ -4,12 +4,12 @@
 * Use librdkafka from the experimental `feat/tls-backends-fips` branch of
   j7nw4r/librdkafka (v2.16.0 with a rustls broker TLS backend and
   `ssl.fips.mode=required`).
-* Add the experimental `rustls` feature. It builds librdkafka with CMake and
-  `RDKAFKA_TLS_BACKEND=rustls` as a shared library, and links it
-  dynamically. It fails the build with `ssl`, `gssapi`, `curl`,
-  `dynamic-linking` or `static-linking`.
-* Add the experimental `rustls-fips` feature. It fails the build unless the
-  generated `config.h` has `WITH_RUSTLS_FIPS` set to 1.
+* Add the experimental `rustls` feature. It builds a static librdkafka with
+  `RDKAFKA_TLS_BACKEND=rustls` and depends on the `rustls-ffi` crate
+  `=0.15.7`, which supplies the `rustls_*` symbols. The application installs
+  the process-default rustls crypto provider. The build fails when `rustls`
+  is combined with `ssl`, `gssapi`, `curl`, `dynamic-linking` or
+  `static-linking`.
 
 ## v4.11.0+2.16.0 (2026-11-21)
 * Bump librdkafka to v2.16.0 ([#865]).

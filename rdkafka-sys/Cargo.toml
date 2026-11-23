@@ -22,6 +22,9 @@ curl-sys = { version = "0.4.80", optional = true }
 zstd-sys = { version = "2.0.15", optional = true }
 lz4-sys = { version = "1.11.1", optional = true }
 sasl2-sys = { version = "0.1.22", optional = true }
+# No crypto provider: the application installs the process-default provider.
+# no_log_capture keeps rustls-ffi from taking the global `log` logger.
+rustls-ffi = { version = "=0.15.7", default-features = false, features = ["no_log_capture"], optional = true }
 
 [build-dependencies]
 pkg-config = "0.3.32"
@@ -56,15 +59,12 @@ ssl = ["openssl-sys"]
 # crate.
 ssl-vendored = ["ssl", "openssl-sys/vendored"]
 
-# Experimental. Use rustls-ffi 0.15.7 as the broker TLS library instead of
-# OpenSSL. Builds librdkafka as a shared library with CMake and links it
-# dynamically. CMake finds rustls-ffi with pkg-config. Conflicts with `ssl`,
-# `gssapi` and `curl`.
-rustls = ["cmake-build"]
-
-# Experimental. Like `rustls`, but fails the build unless the rustls-ffi that
-# pkg-config finds supports FIPS, so that `ssl.fips.mode=required` can work.
-rustls-fips = ["rustls"]
+# Experimental. Use rustls as the broker TLS library instead of OpenSSL.
+# Builds librdkafka statically with CMake and links the rustls-ffi crate into
+# the final binary. The application must install a process-default rustls
+# crypto provider before it creates a client. Conflicts with `ssl`, `gssapi`
+# and `curl`.
+rustls = ["cmake-build", "dep:rustls-ffi"]
 
 # Enable SASL GSSAPI support with Cyrus libsasl2.
 gssapi = ["ssl", "sasl2-sys"]

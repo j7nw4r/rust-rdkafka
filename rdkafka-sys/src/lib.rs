@@ -18,6 +18,9 @@ extern crate zstd_sys;
 #[cfg(feature = "lz4-sys")]
 extern crate lz4_sys;
 
+#[cfg(feature = "rustls")]
+extern crate rustls_ffi;
+
 /// FFI bindings.
 ///
 /// These bindings are automatically generated
