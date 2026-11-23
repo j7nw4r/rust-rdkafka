@@ -56,6 +56,11 @@ ssl = ["openssl-sys"]
 # crate.
 ssl-vendored = ["ssl", "openssl-sys/vendored"]
 
+# Experimental, Windows only. Use Schannel for broker TLS and BCrypt for SASL
+# SCRAM and other authentication crypto, with no OpenSSL. Builds librdkafka
+# statically with CMake. Conflicts with `ssl`, `gssapi` and `curl`.
+schannel = ["cmake-build"]
+
 # Enable SASL GSSAPI support with Cyrus libsasl2.
 gssapi = ["ssl", "sasl2-sys"]
 

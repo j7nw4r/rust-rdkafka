@@ -83,8 +83,54 @@ flags you would pass to `configure` if you were compiling manually).
     limitations with lz4-sys, it is not yet possible to dynamically link
     against the system's version of liblz4.
 
+The **`schannel`** feature selects experimental native Windows TLS and
+crypto backends. See [Schannel and BCrypt](#schannel-and-bcrypt-experimental-windows-only).
+
 All features are disabled by default unless noted otherwise above. The build
 process is defined in [`build.rs`].
+
+### Schannel and BCrypt (experimental, Windows only)
+
+The bundled librdkafka comes from the experimental
+[`feat/tls-crypto-backends`] branch. It adds build-selected backends for broker
+TLS and for authentication crypto. Read its [`docs/TLS-CRYPTO-BACKENDS.md`] and
+[`docs/SCHANNEL-ADAPTER.md`] for their scope and limits.
+
+The **`schannel`** feature enables `cmake-build` and builds librdkafka
+statically with `RDKAFKA_TLS_BACKEND=schannel`,
+`RDKAFKA_CRYPTO_BACKEND=bcrypt` and `WITH_SASL=ON`. Broker TLS uses
+Schannel/SSPI and Crypt32. SASL SCRAM and the other authentication crypto use
+BCrypt/NCrypt. There is no OpenSSL. The build links `secur32`, `crypt32`,
+`bcrypt`, `ncrypt` and `ws2_32`.
+
+  * The build fails on a target that is not Windows.
+  * The build fails if you also enable `ssl`, `ssl-vendored`, `gssapi`,
+    `gssapi-vendored`, `sasl`, `curl`, `curl-static`, `dynamic-linking` or
+    `static-linking`.
+  * `builtin.features` includes `ssl`, `crypto`, `tls_schannel`,
+    `crypto_bcrypt` and `sasl_scram`.
+  * Schannel uses TLS 1.2 only. CA trust comes from `ssl.ca.location` or
+    `ssl.ca.pem`, or from the Windows system store when both are unset.
+  * For mTLS, the client identity must be a certificate with a private key in
+    a Windows store: `ssl.schannel.certificate=CurrentUser/My/<thumbprint>` or
+    `LocalMachine/My/<thumbprint>`, with the 40-hex SHA-1 thumbprint.
+    Schannel can reject an in-memory key from `ssl.key.location` or
+    `ssl.key.pem`, and `ssl.schannel.certificate` cannot be combined with
+    those settings.
+
+```sh
+cargo build --release --features schannel,libz-static --example tls_check
+```
+
+The `tls_check` example takes `-X key=value` librdkafka properties and checks
+a broker connection. By default it creates a new topic, produces records with
+distinct keys, consumes them back and compares every key and value. Run it
+with `--help` for the other modes and options. It needs no Windows-specific
+code, so it also builds without `schannel`.
+
+[`feat/tls-crypto-backends`]: https://github.com/j7nw4r/librdkafka/tree/feat/tls-crypto-backends
+[`docs/TLS-CRYPTO-BACKENDS.md`]: https://github.com/j7nw4r/librdkafka/blob/32a4e8ec3374afb63c58fd4391cf67eced0f14ee/docs/TLS-CRYPTO-BACKENDS.md
+[`docs/SCHANNEL-ADAPTER.md`]: https://github.com/j7nw4r/librdkafka/blob/32a4e8ec3374afb63c58fd4391cf67eced0f14ee/docs/SCHANNEL-ADAPTER.md
 
 [`build.rs`]: https://github.com/fede1024/rust-rdkafka/tree/master/rdkafka-sys/build.rs
 [Apache Kafka]: https://kafka.apache.org

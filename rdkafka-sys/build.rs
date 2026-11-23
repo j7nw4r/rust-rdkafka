@@ -40,6 +40,10 @@ where
 }
 
 fn main() {
+    if env::var("CARGO_FEATURE_SCHANNEL").is_ok() {
+        check_schannel_features();
+    }
+
     if env::var("CARGO_FEATURE_DYNAMIC_LINKING").is_ok() {
         eprintln!("librdkafka will be linked dynamically");
 
@@ -97,6 +101,45 @@ fn main() {
         }
         eprintln!("Building and linking librdkafka statically");
         build_librdkafka();
+    }
+}
+
+fn check_schannel_features() {
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if target_os != "windows" {
+        eprintln!(
+            "error: the `schannel` feature requires a Windows target, but the target OS is `{}`. \
+             Schannel TLS and BCrypt crypto are Windows APIs.",
+            target_os
+        );
+        process::exit(1);
+    }
+
+    // A Schannel build has no OpenSSL. The features below add OpenSSL, Cyrus
+    // SASL, curl's own TLS, or a librdkafka that this crate does not build.
+    let conflicts: Vec<&str> = [
+        ("SSL", "ssl"),
+        ("GSSAPI", "gssapi"),
+        ("CURL", "curl"),
+        ("CURL_STATIC", "curl-static"),
+        ("DYNAMIC_LINKING", "dynamic-linking"),
+        ("STATIC_LINKING", "static-linking"),
+    ]
+    .iter()
+    .filter(|(var, _)| env::var(format!("CARGO_FEATURE_{}", var)).is_ok())
+    .map(|(_, feature)| *feature)
+    .collect();
+    if !conflicts.is_empty() {
+        eprintln!(
+            "error: the `schannel` feature cannot be combined with these features: {}",
+            conflicts.join(", ")
+        );
+        eprintln!(
+            "The `schannel` feature builds a static librdkafka with Schannel TLS and BCrypt \
+             crypto, without OpenSSL or curl. `ssl-vendored`, `gssapi-vendored` and `sasl` \
+             enable `ssl` or `gssapi`."
+        );
+        process::exit(1);
     }
 }
 
@@ -298,7 +341,9 @@ fn build_librdkafka() {
             env::set_var("PKG_CONFIG_PATH", new_pkg_config_path);
         }
     } else {
-        config.define("WITH_SASL", "0");
+        // On Windows, WITH_SASL adds SASL/SCRAM with the BCrypt backend.
+        let schannel = env::var("CARGO_FEATURE_SCHANNEL").is_ok();
+        config.define("WITH_SASL", if schannel { "1" } else { "0" });
     }
 
     if env::var("CARGO_FEATURE_ZSTD").is_ok() {
@@ -313,6 +358,11 @@ fn build_librdkafka() {
         config.register_dep("lz4");
     } else {
         config.define("ENABLE_LZ4_EXT", "0");
+    }
+
+    if env::var("CARGO_FEATURE_SCHANNEL").is_ok() {
+        config.define("RDKAFKA_TLS_BACKEND", "schannel");
+        config.define("RDKAFKA_CRYPTO_BACKEND", "bcrypt");
     }
 
     if let Ok(system_name) = env::var("CMAKE_SYSTEM_NAME") {
@@ -332,4 +382,10 @@ fn build_librdkafka() {
 
     println!("cargo:rustc-link-search=native={}/lib", dst.display());
     println!("cargo:rustc-link-lib=static=rdkafka");
+    if env::var("CARGO_FEATURE_SCHANNEL").is_ok() {
+        // A static library does not carry its CMake link dependencies.
+        for lib in ["secur32", "crypt32", "bcrypt", "ncrypt", "ws2_32"] {
+            println!("cargo:rustc-link-lib={}", lib);
+        }
+    }
 }

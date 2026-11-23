@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+* Use librdkafka from the experimental `feat/tls-crypto-backends` branch of
+  j7nw4r/librdkafka (v2.16.0 with build-selected TLS and crypto backends).
+* Add the experimental, Windows-only `schannel` feature. It builds a static
+  librdkafka with Schannel TLS, BCrypt crypto and SASL (including SCRAM), and
+  links `secur32`, `crypt32`, `bcrypt`, `ncrypt` and `ws2_32`. The build
+  fails on other targets, and with `ssl`, `gssapi`, `curl`,
+  `dynamic-linking` or `static-linking`.
+
 ## v4.11.0+2.16.0 (2026-11-21)
 * Bump librdkafka to v2.16.0 ([#865]).
 * Add the `RDKafkaErrorCode` variants that librdkafka added since v2.12.1:
