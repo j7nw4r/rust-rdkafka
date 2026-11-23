@@ -140,8 +140,10 @@ cargo build --release --features schannel,libz-static --example tls_check
 
 The `tls_check` example takes `-X key=value` librdkafka properties and checks
 a broker connection. By default it creates a new topic, produces records with
-distinct keys, consumes them back and compares every key and value. Run it
-with `--help` for the other modes and options. It needs no Windows-specific
+distinct keys, consumes them back and compares every key and value. With
+`--no-create --topic NAME` it uses an existing, empty topic instead, for a
+service that does not allow CreateTopics. Run it with `--help` for the other
+modes and options. It needs no Windows-specific
 code, so it also builds without `schannel`.
 
 #### Windows alternatives to `gssapi`, `dynamic-linking` and `static-linking`

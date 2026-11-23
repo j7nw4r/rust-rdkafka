@@ -9,7 +9,8 @@ See also the [rdkafka-sys changelog](rdkafka-sys/changelog.md).
   re-exports of the new `rdkafka-sys` features.
 * Add the `tls_check` example. It takes `-X` librdkafka properties and checks
   a broker with a produce/consume roundtrip or a metadata request. Its
-  `oauth` mode checks that the built-in OIDC handler gets a token.
+  `oauth` mode checks that the built-in OIDC handler gets a token, and
+  `--no-create` uses an existing, empty topic.
 
 ## 0.40.0 (2026-11-21)
 

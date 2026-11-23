@@ -4,7 +4,9 @@
 //! `builtin.features`, and then runs one mode:
 //!
 //! * `roundtrip` (default): creates a new topic, produces `--count` records
-//!   with distinct keys, consumes them back and compares every key and value.
+//!   with distinct keys, consumes them back from every partition and compares
+//!   every key and value. With `--no-create` it uses the existing, empty
+//!   `--topic` instead.
 //! * `metadata`: fetches cluster metadata only.
 //! * `oauth`: waits until the built-in SASL OAUTHBEARER (OIDC) handler fetches
 //!   a token and librdkafka accepts it. No broker is needed.
@@ -234,10 +236,19 @@ impl Check {
             ("group.id", group.as_str()),
             ("enable.auto.commit", "false"),
         ]);
+        // An existing topic (--no-create) can have more than one partition.
+        let metadata = consumer
+            .fetch_metadata(Some(topic), self.timeout)
+            .unwrap_or_else(|err| self.fail(7, format!("topic metadata: {}", err)));
         let mut assignment = TopicPartitionList::new();
-        assignment
-            .add_partition_offset(topic, 0, Offset::Beginning)
-            .unwrap();
+        for partition in metadata.topics().iter().flat_map(|t| t.partitions()) {
+            assignment
+                .add_partition_offset(topic, partition.id(), Offset::Beginning)
+                .unwrap();
+        }
+        if assignment.count() == 0 {
+            self.fail(7, format!("topic {} has no partitions", topic));
+        }
         consumer
             .assign(&assignment)
             .unwrap_or_else(|err| self.fail(7, format!("assign: {}", err)));
@@ -264,8 +275,8 @@ impl Check {
                         Some(_) => self.fail(7, format!("wrong value for key {}", key)),
                         None => self.fail(7, format!("unexpected key {}", key)),
                     }
-                    if !received.insert(key.into_owned()) {
-                        self.fail(7, "duplicate record".into());
+                    if !received.insert(key.to_string()) {
+                        self.fail(7, format!("duplicate key {} (is the topic empty?)", key));
                     }
                 }
                 // librdkafka retries transport errors itself.
@@ -302,7 +313,14 @@ fn main() {
         .arg(
             Arg::new("topic")
                 .long("topic")
-                .help("New topic to create (default: a unique name)"),
+                .help("Topic; must be new unless --no-create (default: a unique name)"),
+        )
+        .arg(
+            Arg::new("no-create")
+                .long("no-create")
+                .action(ArgAction::SetTrue)
+                .requires("topic")
+                .help("Use the existing, empty --topic instead of creating one"),
         )
         .arg(
             Arg::new("timeout")
@@ -400,7 +418,9 @@ fn main() {
                 .map(|i| (format!("key-{:06}", i), format!("value-{}-{}", i, topic)))
                 .collect();
             check.metadata();
-            check.create_topic(&topic);
+            if !matches.get_flag("no-create") {
+                check.create_topic(&topic);
+            }
             check.produce(&topic, &records);
             check.consume(&topic, &records);
             check.succeeded("roundtrip");
