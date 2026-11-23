@@ -105,10 +105,18 @@ BCrypt/NCrypt. There is no OpenSSL. The build links `secur32`, `crypt32`,
 
   * The build fails on a target that is not Windows.
   * The build fails if you also enable `ssl`, `ssl-vendored`, `gssapi`,
-    `gssapi-vendored`, `sasl`, `curl`, `curl-static`, `dynamic-linking` or
-    `static-linking`.
+    `gssapi-vendored`, `sasl`, `dynamic-linking` or `static-linking`.
+  * `curl-static` adds HTTPS for SASL OAUTHBEARER OIDC. curl-sys builds its
+    bundled curl with Schannel on Windows, so HTTPS also has no OpenSSL.
+    `curl` alone can link a system or vcpkg libcurl with an unknown TLS
+    library, so the build fails unless curl-sys builds the bundled curl.
+    Do not enable the curl-sys `windows-static-ssl` feature, which builds
+    curl with OpenSSL. HTTPS trust comes from `https.ca.location` (a PEM
+    file) or `https.ca.pem`, or from the Windows system store when both are
+    unset. A CA directory and `https.ca.location=probe` fail.
   * `builtin.features` includes `ssl`, `crypto`, `tls_schannel`,
-    `crypto_bcrypt` and `sasl_scram`.
+    `crypto_bcrypt` and `sasl_scram`, and also `http` and `oidc` with
+    `curl-static`.
   * Schannel uses TLS 1.2 only. CA trust comes from `ssl.ca.location` or
     `ssl.ca.pem`, or from the Windows system store when both are unset.
   * For mTLS, the client identity must be a certificate with a private key in

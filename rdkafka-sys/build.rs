@@ -116,12 +116,10 @@ fn check_schannel_features() {
     }
 
     // A Schannel build has no OpenSSL. The features below add OpenSSL, Cyrus
-    // SASL, curl's own TLS, or a librdkafka that this crate does not build.
+    // SASL, or a librdkafka that this crate does not build.
     let conflicts: Vec<&str> = [
         ("SSL", "ssl"),
         ("GSSAPI", "gssapi"),
-        ("CURL", "curl"),
-        ("CURL_STATIC", "curl-static"),
         ("DYNAMIC_LINKING", "dynamic-linking"),
         ("STATIC_LINKING", "static-linking"),
     ]
@@ -136,8 +134,18 @@ fn check_schannel_features() {
         );
         eprintln!(
             "The `schannel` feature builds a static librdkafka with Schannel TLS and BCrypt \
-             crypto, without OpenSSL or curl. `ssl-vendored`, `gssapi-vendored` and `sasl` \
-             enable `ssl` or `gssapi`."
+             crypto, without OpenSSL. `ssl-vendored`, `gssapi-vendored` and `sasl` enable \
+             `ssl` or `gssapi`."
+        );
+        process::exit(1);
+    }
+
+    // curl-sys builds its bundled curl with Schannel on Windows. A system or
+    // vcpkg libcurl can use OpenSSL, and curl-sys does not report its backend.
+    if needs_curl() && env::var("DEP_CURL_STATIC").as_deref() != Ok("1") {
+        eprintln!(
+            "error: the `schannel` feature needs the curl that curl-sys builds with Schannel, \
+             but curl-sys linked a system or vcpkg libcurl. Enable `curl-static`."
         );
         process::exit(1);
     }

@@ -6,8 +6,11 @@
 * Add the experimental, Windows-only `schannel` feature. It builds a static
   librdkafka with Schannel TLS, BCrypt crypto and SASL (including SCRAM), and
   links `secur32`, `crypt32`, `bcrypt`, `ncrypt` and `ws2_32`. The build
-  fails on other targets, and with `ssl`, `gssapi`, `curl`,
-  `dynamic-linking` or `static-linking`.
+  fails on other targets, and with `ssl`, `gssapi`, `dynamic-linking` or
+  `static-linking`.
+* Allow `curl-static` with `schannel` for SASL OAUTHBEARER OIDC. curl-sys
+  builds curl with Schannel on Windows. The build fails if curl-sys links a
+  system or vcpkg libcurl instead.
 
 ## v4.11.0+2.16.0 (2026-11-21)
 * Bump librdkafka to v2.16.0 ([#865]).
