@@ -136,6 +136,7 @@ use rdkafka::config::ClientConfig;
 use rdkafka::producer::BaseProducer;
 
 fn main() {
+    // For ssl.fips.mode=required, use rustls_cng_crypto::fips_provider().
     #[cfg(windows)]
     let provider = rustls_cng_crypto::default_provider();
     #[cfg(not(windows))]
@@ -162,16 +163,19 @@ The error is `the process-default rustls crypto provider does not report
 FIPS mode`. A passing runtime check is not a FIPS 140-3 deployment
 qualification.
 
-  * rustls-cng-crypto reports FIPS from `BCryptGetFipsAlgorithmMode`. On
+  * On Windows, install `rustls_cng_crypto::fips_provider()` and enable
+    the policy "System cryptography: Use FIPS compliant algorithms for
+    encryption, hashing, and signing". The default
+    `rustls_cng_crypto::default_provider()` never satisfies required mode:
+    it also has algorithms that are not FIPS-approved, so its `fips()` is
+    false even with the policy on.
+  * The FIPS provider reports FIPS from `BCryptGetFipsAlgorithmMode`. On
     Windows Server 2022 build 20348.5870 (measured on 2026-11-23), that
     call followed the legacy policy value
     `HKLM\System\CurrentControlSet\Control\Lsa\FipsAlgorithmPolicy\Enabled`:
     0 gave 0 and 1 gave 1, before and after a reboot, and a new process
-    saw a change without a reboot. So `ssl.fips.mode=required` with this
-    provider passes only when the policy "System cryptography: Use FIPS
-    compliant algorithms for encryption, hashing, and signing" is enabled.
-  * `rustls_cng_crypto::fips_provider()` keeps only FIPS-approved
-    algorithms. It is empty when that policy is off, and client creation
+    saw a change without a reboot.
+  * The FIPS provider is empty when the policy is off. Client creation
     then fails with `the process-default rustls crypto provider has no
     cipher suites`.
   * The rustls `fips` feature gives `rustls::crypto::default_fips_provider()`,
@@ -197,9 +201,14 @@ cargo run --features aws-lc-rs-fips -- --provider aws-lc-rs-fips --fips \
 ```
 
 On Windows, use `--no-default-features --features cng,rdkafka/libz-static`
-and `--provider cng`. CI runs the test on Windows with `cng` and with
-`cng-fips` (empty, because the runner is not in FIPS mode). A broker
-roundtrip with this crate on Windows is still being tested.
+and `--provider cng` or `--provider cng-fips`. CI runs the test on Windows
+with `cng` and with `cng-fips` (empty, because the runner is not in FIPS
+mode). On Windows Server 2022 with Kafka mTLS, `cng` worked with the FIPS
+policy off, and `cng-fips` with `--fips` worked with the policy on.
+
+During a roundtrip the consumer can report a few transient
+`BrokerTransportFailure` or `AllBrokersDown` errors before it receives
+every record. The cause has not been investigated.
 
 [`feat/tls-backends-fips`]: https://github.com/j7nw4r/librdkafka/tree/feat/tls-backends-fips
 [`docs/TLS-BACKENDS.md`]: https://github.com/j7nw4r/librdkafka/blob/feat/tls-backends-fips/docs/TLS-BACKENDS.md
