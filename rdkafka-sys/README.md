@@ -164,8 +164,8 @@ user. There is no separate feature, because librdkafka has no build option
 that removes SSPI Kerberos on Windows. Use `sasl.mechanisms=GSSAPI` and set
 `sasl.kerberos.service.name`. The `gssapi` feature (Cyrus SASL and OpenSSL)
 conflicts with `schannel`. CI checks only that librdkafka selects the
-`Win32 SSPI` provider. Kerberos against a real KDC or Active Directory has
-not been tested.
+`Win32 SSPI` provider. SSPI Kerberos has not yet been confirmed against a
+real KDC or Active Directory.
 
 #### OAuth with Microsoft Entra ID
 
@@ -180,10 +180,29 @@ and `client_assertion=`, signed with PS256 and with an `x5t#S256` header (see
 [Microsoft identity platform certificate credentials]). For Entra
 certificate authentication, make the token in your application: implement
 `ClientContext::generate_oauth_token` and set
-`ClientContext::ENABLE_REFRESH_OAUTH_TOKEN` to `true`. For an Azure managed
-identity, librdkafka can fetch the token itself with
-`sasl.oauthbearer.metadata.authentication.type=azure_imds` and `curl`. This
-crate has not tested either Entra route.
+`ClientContext::ENABLE_REFRESH_OAUTH_TOKEN` to `true`. This route has not
+been tested.
+
+For an Azure managed identity, librdkafka fetches the token itself from the
+Azure Instance Metadata Service (IMDS) over HTTP through curl. Set the
+`resource` in `sasl.oauthbearer.config` to the URL of the Event Hubs
+namespace. With `resource=https://eventhubs.azure.net` the Kafka endpoint
+refuses the token with `Invalid tenant name 'eventhubs'`, and with
+`resource=https://management.azure.com/` it refuses it with `Invalid tenant
+name 'management'`. This configuration passed a 96-record `tls_check`
+roundtrip (`schannel,curl-static,libz-static`, `--no-create` on a new event
+hub with 2 partitions). The client ran on an Azure VM with a system-assigned
+identity that had the "Azure Event Hubs Data Owner" role. The Standard
+namespace had local authentication off, so it accepted only Entra tokens.
+
+```text
+bootstrap.servers=<namespace>.servicebus.windows.net:9093
+security.protocol=sasl_ssl
+sasl.mechanisms=OAUTHBEARER
+sasl.oauthbearer.method=oidc
+sasl.oauthbearer.metadata.authentication.type=azure_imds
+sasl.oauthbearer.config=query=api-version=2018-02-01&resource=https://<namespace>.servicebus.windows.net
+```
 
 #### Windows alternatives to `dynamic-linking` and `static-linking`
 
