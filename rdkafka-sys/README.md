@@ -114,9 +114,11 @@ BCrypt/NCrypt. There is no OpenSSL. The build links `secur32`, `crypt32`,
   * For mTLS, the client identity must be a certificate with a private key in
     a Windows store: `ssl.schannel.certificate=CurrentUser/My/<thumbprint>` or
     `LocalMachine/My/<thumbprint>`, with the 40-hex SHA-1 thumbprint.
-    Schannel can reject an in-memory key from `ssl.key.location` or
-    `ssl.key.pem`, and `ssl.schannel.certificate` cannot be combined with
-    those settings.
+    A PEM key from `ssl.key.location` or `ssl.key.pem` is imported in
+    memory, and Schannel can reject it. On the windows-latest CI runner,
+    client creation fails with `Schannel cannot use this ephemeral
+    private-key identity (0x8009030d)`. `ssl.schannel.certificate` cannot be
+    combined with those settings.
 
 ```sh
 cargo build --release --features schannel,libz-static --example tls_check
