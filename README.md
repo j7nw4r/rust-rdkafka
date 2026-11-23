@@ -127,8 +127,8 @@ your executable. To compile librdkafka you'll need:
 * `libsasl2-dev`: optional, *not* included by default (feature: `gssapi`)
 * `libcurl-dev` (e.g. `libcurl4-openssl-dev` on Ubuntu): optional, *not* included by default (feature: `curl`)
 * `libzstd-dev`: optional, *not* included by default (feature: `zstd-pkg-config`)
-* rustls-ffi 0.15.7: optional, experimental, *not* included by default
-  (features: `rustls`, `rustls-fips`)
+* rustls: optional, experimental, *not* included by default (feature:
+  `rustls`; needs `cmake` and Rust 1.85)
 
 Note that using the CMake build system, via the `cmake-build` feature, is
 encouraged if you can take the dependency on CMake.
@@ -147,13 +147,12 @@ If you'd like to compile librdkafka statically yourself, you can use
 `static-linking` while supplying `DEP_LIBRDKAFKA_STATIC_ROOT` with the path
 to where librdkafka was built.
 
-The experimental `rustls` feature uses rustls-ffi as the broker TLS
-library instead of OpenSSL, and links a shared librdkafka. The
-`rustls-fips` feature also fails the build unless rustls-ffi supports FIPS,
-for use with `ssl.fips.mode=required`. These features need a rustls-ffi
-found by pkg-config. Read [rustls and FIPS][rdkafka-sys-rustls] before you
-use them. The `tls_roundtrip` example produces and consumes records over
-TLS or mTLS.
+The experimental `rustls` feature uses rustls instead of OpenSSL for broker
+TLS. It links the rustls-ffi crate into your binary and a static
+librdkafka. Your application must install a process-default rustls crypto
+provider before it creates a client, for example rustls-cng-crypto on
+Windows. With `ssl.fips.mode=required`, client creation fails unless that
+provider reports FIPS. Read [rustls][rdkafka-sys-rustls] before you use it.
 
 For a full listing of features, consult the [rdkafka-sys crate's
 documentation][rdkafka-sys-features]. All of rdkafka-sys features are
@@ -240,7 +239,7 @@ logging framework.
 [message delivery semantics]: https://kafka.apache.org/documentation/#semantics
 [producer-transactions]: https://docs.rs/rdkafka/*/rdkafka/producer/#transactions
 [rdkafka-sys-features]: https://github.com/fede1024/rust-rdkafka/tree/master/rdkafka-sys/README.md#features
-[rdkafka-sys-rustls]: https://github.com/fede1024/rust-rdkafka/tree/master/rdkafka-sys/README.md#rustls-and-fips-experimental
+[rdkafka-sys-rustls]: https://github.com/fede1024/rust-rdkafka/tree/master/rdkafka-sys/README.md#rustls-experimental
 [Tokio]: https://tokio.rs/
 
 ## rdkafka-sys

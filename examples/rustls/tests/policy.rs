@@ -1,9 +1,10 @@
-//! Client creation with `ssl.fips.mode=required`. No broker is needed.
-#![cfg(feature = "rustls")]
+//! Client creation with and without a process-default rustls provider. No
+//! broker is needed.
 
 use rdkafka::config::ClientConfig;
 use rdkafka::error::KafkaResult;
 use rdkafka::producer::BaseProducer;
+use rdkafka_rustls_example::{provider, PROVIDERS};
 
 // A self-signed CA whose key was discarded. The client only parses it.
 const TEST_CA: &str = "\
@@ -29,29 +30,39 @@ SvBjDIZsYGq5uOFrpL2taMV11W3vmC+SRyOVylntg+Z8auEhusG8NRn5nAwLHXAU
 -----END CERTIFICATE-----
 ";
 
-fn required_mode_producer() -> KafkaResult<BaseProducer> {
-    ClientConfig::new()
+fn producer(fips: bool) -> KafkaResult<BaseProducer> {
+    let mut config = ClientConfig::new();
+    config
         .set("bootstrap.servers", "localhost:9093")
         .set("security.protocol", "ssl")
-        .set("ssl.fips.mode", "required")
-        .set("ssl.ca.pem", TEST_CA)
-        .create()
+        .set("ssl.ca.pem", TEST_CA);
+    if fips {
+        config.set("ssl.fips.mode", "required");
+    }
+    config.create()
 }
 
-#[cfg(feature = "rustls-fips")]
+// One process has one provider registry, so the steps run in order in one
+// test. RDKAFKA_TEST_PROVIDER selects the provider; the default is the first
+// one in PROVIDERS.
 #[test]
-fn fips_build_initializes_required_mode() {
-    required_mode_producer().expect("required mode must initialize with a FIPS rustls-ffi");
-}
+fn provider_policy() {
+    let err = producer(false).expect_err("a TLS client must be refused without a provider");
+    println!("no provider: {}", err);
 
-#[cfg(not(feature = "rustls-fips"))]
-#[test]
-fn ordinary_rustls_build_refuses_required_mode() {
-    let err = required_mode_producer()
-        .expect_err("required mode must be refused without a FIPS rustls-ffi");
-    assert!(
-        err.to_string().contains("ssl.fips.mode=required"),
-        "unexpected error: {}",
-        err
-    );
+    let name = std::env::var("RDKAFKA_TEST_PROVIDER").unwrap_or_else(|_| PROVIDERS[0].into());
+    let provider = provider(&name).expect("the provider is not in this build");
+    let fips = provider.fips();
+    println!("provider {}: fips() = {}", name, fips);
+    provider.install_default().unwrap();
+
+    producer(false).expect("an ordinary TLS client must be created");
+    let required = producer(true);
+    println!("required mode: {:?}", required.as_ref().err());
+    assert_eq!(required.is_ok(), fips);
+    match name.as_str() {
+        "ring" => assert!(!fips),
+        "aws-lc-rs-fips" => assert!(fips),
+        _ => {}
+    }
 }

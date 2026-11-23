@@ -9,11 +9,14 @@ description = "Rust wrapper for librdkafka"
 keywords = ["kafka", "rdkafka"]
 categories = ["api-bindings"]
 edition = "2021"
-exclude = ["Cargo.lock"]
+exclude = ["Cargo.lock", "examples/rustls"]
 rust-version = "1.74"
 
 [workspace]
 members = ["rdkafka-sys"]
+# A separate application, so that its crypto providers stay out of the
+# dev-dependencies of rdkafka.
+exclude = ["examples/rustls"]
 
 [dependencies]
 rdkafka-sys = { path = "rdkafka-sys", version = "4.11.0", default-features = false }

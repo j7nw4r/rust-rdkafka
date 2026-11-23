@@ -141,7 +141,6 @@ tests/
   future_producer.rs
   metadata.rs
   producer.rs
-  rustls_fips_policy.rs          (no broker; runs only with `rustls`)
   stream_consumers.rs
   topic_partition_lists.rs       (pure unit-style; no broker)
   transactions.rs

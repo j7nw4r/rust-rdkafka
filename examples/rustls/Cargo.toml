@@ -1,0 +1,22 @@
+[package]
+name = "rdkafka-rustls-example"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Installs a rustls crypto provider and uses rdkafka with the rustls feature"
+
+[dependencies]
+rdkafka = { path = "../..", features = ["rustls"] }
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12"] }
+tokio = { version = "1.18", features = ["macros", "rt-multi-thread"] }
+
+[target.'cfg(windows)'.dependencies]
+rustls-cng-crypto = { version = "0.1.2", optional = true }
+
+[features]
+default = ["ring"]
+# Stand-in providers for development and tests.
+ring = ["rustls/ring"]
+aws-lc-rs-fips = ["rustls/fips"]
+# The Windows CNG (BCrypt) provider.
+cng = ["dep:rustls-cng-crypto"]
