@@ -114,6 +114,12 @@ BCrypt/NCrypt. There is no OpenSSL. The build links `secur32`, `crypt32`,
     curl with OpenSSL. HTTPS trust comes from `https.ca.location` (a PEM
     file) or `https.ca.pem`, or from the Windows system store when both are
     unset. A CA directory and `https.ca.location=probe` fail.
+  * curl's Schannel backend checks certificate revocation, and librdkafka
+    does not turn that check off. The HTTPS server certificate must name a
+    CRL or OCSP location that the client can reach. On the windows-latest
+    CI runner, a server certificate from a private CA without a CRL
+    distribution point fails with `schannel: the revocation status is
+    unknown`.
   * `builtin.features` includes `ssl`, `crypto`, `tls_schannel`,
     `crypto_bcrypt` and `sasl_scram`, and also `http` and `oidc` with
     `curl-static`.
