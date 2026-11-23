@@ -17,7 +17,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::process;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -34,6 +34,9 @@ use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::util::get_rdkafka_version;
 use rdkafka::ClientContext;
 
+/// librdkafka log lines at or below this syslog level are printed.
+static LOG_LEVEL: AtomicI32 = AtomicI32::new(RDKafkaLogLevel::Warning as i32);
+
 #[derive(Default)]
 struct CheckContext {
     delivered: AtomicUsize,
@@ -49,7 +52,7 @@ impl ClientContext for CheckContext {
         if log_message.contains("after setting OAUTHBEARER token") {
             self.token_set.store(true, Ordering::SeqCst);
         }
-        if (level as i32) <= RDKafkaLogLevel::Warning as i32 {
+        if (level as i32) <= LOG_LEVEL.load(Ordering::Relaxed) {
             eprintln!("librdkafka {:?} {}: {}", level, fac, log_message);
         }
     }
@@ -147,8 +150,10 @@ impl Check {
         let debug = self.config.get("debug").unwrap_or("security").to_string();
         let producer: BaseProducer<CheckContext> = self.client(&[("debug", debug.as_str())]);
         let deadline = Instant::now() + self.timeout;
-        // Polling serves the built-in token refresh.
-        while Instant::now() < deadline {
+        // Polling serves the built-in token refresh. The refresh runs inside
+        // poll and can block it for the whole HTTP request.
+        loop {
+            let expired = Instant::now() >= deadline;
             producer.poll(Duration::from_millis(200));
             if let Some(reason) = producer.context().token_error.lock().unwrap().clone() {
                 self.fail(9, format!("oauth: {}", reason));
@@ -157,11 +162,13 @@ impl Check {
                 println!("OAUTHBEARER token set");
                 return;
             }
+            if expired {
+                self.fail(
+                    9,
+                    format!("oauth: no OAUTHBEARER token after {:?}", self.timeout),
+                );
+            }
         }
-        self.fail(
-            9,
-            format!("oauth: no OAUTHBEARER token after {:?}", self.timeout),
-        );
     }
 
     fn create_topic(&self, topic: &str) {
@@ -302,6 +309,13 @@ fn main() {
                 .help("Seconds for each phase"),
         )
         .arg(
+            Arg::new("log-level")
+                .long("log-level")
+                .value_parser(clap::value_parser!(i32))
+                .default_value("4")
+                .help("Print librdkafka logs at or below this syslog level (7 is debug)"),
+        )
+        .arg(
             Arg::new("expect-features")
                 .long("expect-features")
                 .value_delimiter(',')
@@ -314,6 +328,10 @@ fn main() {
         )
         .get_matches();
 
+    LOG_LEVEL.store(
+        *matches.get_one::<i32>("log-level").unwrap(),
+        Ordering::Relaxed,
+    );
     let mut config = ClientConfig::new();
     for property in matches.get_many::<String>("property").unwrap_or_default() {
         let Some((key, value)) = property.split_once('=') else {
