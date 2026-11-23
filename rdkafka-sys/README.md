@@ -159,13 +159,37 @@ code, so it also builds without `schannel`.
 #### Kerberos (SASL GSSAPI)
 
 On Windows, librdkafka always compiles SASL GSSAPI through SSPI, and the
-`schannel` build always includes it, with the credentials of the logged-on
-user. There is no separate feature, because librdkafka has no build option
-that removes SSPI Kerberos on Windows. Use `sasl.mechanisms=GSSAPI` and set
-`sasl.kerberos.service.name`. The `gssapi` feature (Cyrus SASL and OpenSSL)
-conflicts with `schannel`. CI checks only that librdkafka selects the
-`Win32 SSPI` provider. SSPI Kerberos has not yet been confirmed against a
-real KDC or Active Directory.
+`schannel` build always includes it. There is no separate feature, because
+librdkafka has no build option that removes SSPI Kerberos on Windows. The
+`gssapi` feature (Cyrus SASL and OpenSSL) conflicts with `schannel`.
+
+The client authenticates as the logon identity of the process. On Windows,
+librdkafka does not use `sasl.kerberos.principal` or `sasl.kerberos.keytab`.
+`sasl.kerberos.service.name` defaults to `kafka`.
+
+```text
+bootstrap.servers=kafka.corp.test:9093
+security.protocol=sasl_ssl
+sasl.mechanisms=GSSAPI
+ssl.ca.location=<CA PEM file>
+```
+
+This configuration passed a 96-record `tls_check` roundtrip
+(`schannel,libz-static`) against Kafka 4.1.1 with a SASL_SSL GSSAPI listener
+and an Active Directory keytab for `kafka/kafka.corp.test@CORP.TEST`. The
+client ran as SYSTEM on an Azure Windows Server 2022 VM joined to the
+`corp.test` test domain, so the machine account `winval$@CORP.TEST`
+authenticated through SSPI. A wrong `sasl.kerberos.service.name` was
+refused. librdkafka was at 9506c794.
+
+Before librdkafka 9938a14b, MSVC CMake builds passed the wide target name
+to `InitializeSecurityContextA`, because only MinGW builds define
+`UNICODE`, and Kerberos failed with `Target unknown (0x80090303)`. Upstream
+librdkafka has the same bug. The bundled librdkafka has the fix, and CI
+checks that `tls_check.exe` imports `InitializeSecurityContextW` and
+`AcquireCredentialsHandleW` and not `InitializeSecurityContextA`. CI also
+checks that librdkafka selects the `Win32 SSPI` provider for GSSAPI. CI has
+no KDC.
 
 #### OAuth with Microsoft Entra ID
 
@@ -267,8 +291,8 @@ rdkafka = { version = "0.40", features = ["ssl"] }
 ```
 
 [`feat/tls-crypto-backends`]: https://github.com/j7nw4r/librdkafka/tree/feat/tls-crypto-backends
-[`docs/TLS-CRYPTO-BACKENDS.md`]: https://github.com/j7nw4r/librdkafka/blob/09579a05cd1b72fa76b3664a69235772c310b9a6/docs/TLS-CRYPTO-BACKENDS.md
-[`docs/SCHANNEL-ADAPTER.md`]: https://github.com/j7nw4r/librdkafka/blob/09579a05cd1b72fa76b3664a69235772c310b9a6/docs/SCHANNEL-ADAPTER.md
+[`docs/TLS-CRYPTO-BACKENDS.md`]: https://github.com/j7nw4r/librdkafka/blob/6e17126a58f426e259885337bba542f1053c4690/docs/TLS-CRYPTO-BACKENDS.md
+[`docs/SCHANNEL-ADAPTER.md`]: https://github.com/j7nw4r/librdkafka/blob/6e17126a58f426e259885337bba542f1053c4690/docs/SCHANNEL-ADAPTER.md
 [Microsoft identity platform certificate credentials]: https://learn.microsoft.com/en-us/entra/identity-platform/certificate-credentials
 
 [`build.rs`]: https://github.com/fede1024/rust-rdkafka/tree/master/rdkafka-sys/build.rs
