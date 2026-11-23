@@ -8,6 +8,7 @@ on:
       - ".github/workflows/schannel.yml"
       - "Cargo.toml"
       - "Cargo.lock"
+      - ".github/scripts/**"
       - "examples/tls_check.rs"
       - "rdkafka-sys/**"
       - "src/**"
@@ -17,6 +18,7 @@ on:
       - ".github/workflows/schannel.yml"
       - "Cargo.toml"
       - "Cargo.lock"
+      - ".github/scripts/**"
       - "examples/tls_check.rs"
       - "rdkafka-sys/**"
       - "src/**"
@@ -64,5 +66,82 @@ jobs:
             -X sasl.mechanisms=SCRAM-SHA-512 -X sasl.username=user -X sasl.password=secret
           $check --mode metadata $tls -X bootstrap.servers=127.0.0.1:1 --timeout 5 \
             --expect-error "metadata"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --quiet pefile
+      - run: >-
+          python .github/scripts/check_imports.py target/debug/examples/tls_check.exe
+          bcrypt.dll ncrypt.dll crypt32.dll secur32.dll
       - run: cargo test --features schannel,libz-static
         working-directory: rdkafka-sys
+
+  # The OIDC token fetch uses curl, which curl-sys builds with Schannel, and the
+  # JWT assertion signing uses librdkafka's BCrypt backend.
+  schannel-oidc:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lukka/get-cmake@latest
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.rust_version }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --quiet cryptography pefile
+      - run: cargo build --features schannel,curl-static,libz-static --example tls_check
+      - run: >-
+          python .github/scripts/check_imports.py target/debug/examples/tls_check.exe
+          bcrypt.dll ncrypt.dll crypt32.dll secur32.dll
+      - name: OIDC through curl and Schannel
+        shell: bash
+        env:
+          MSYS_NO_PATHCONV: "1"
+        run: |
+          set -euo pipefail
+          dir="$(cygpath -m "$RUNNER_TEMP")/oidc"
+          python .github/scripts/oidc_token_server.py --dir "$dir" > oidc-server.log 2>&1 &
+          server=$!
+          trap 'kill $server || true; cat oidc-server.log' EXIT
+          for _ in $(seq 1 60); do [ -f "$dir/token-url" ] && break; sleep 1; done
+          check=target/debug/examples/tls_check.exe
+          $check --mode features \
+            --expect-features ssl,crypto,tls_schannel,crypto_bcrypt,sasl_oauthbearer,http,oidc
+          oidc=(-X bootstrap.servers=127.0.0.1:1 -X security.protocol=sasl_plaintext
+            -X sasl.mechanisms=OAUTHBEARER -X sasl.oauthbearer.method=oidc
+            -X "sasl.oauthbearer.token.endpoint.url=$(cat "$dir/token-url")")
+          creds=(-X sasl.oauthbearer.client.id=tls-check-client)
+          jwt=(-X sasl.oauthbearer.grant.type=urn:ietf:params:oauth:grant-type:jwt-bearer
+            -X sasl.oauthbearer.assertion.claim.sub=tls-check)
+          ca=(-X "https.ca.location=$dir/ca.pem")
+          echo "== client credentials"
+          $check --mode oauth "${oidc[@]}" "${creds[@]}" "${ca[@]}" \
+            -X sasl.oauthbearer.client.secret=tls-check-secret
+          for alg in RS256 ES256; do
+            echo "== jwt-bearer $alg"
+            key="$dir/assertion-$(echo $alg | tr A-Z a-z).key"
+            $check --mode oauth "${oidc[@]}" "${jwt[@]}" "${ca[@]}" \
+              -X sasl.oauthbearer.assertion.algorithm=$alg \
+              -X "sasl.oauthbearer.assertion.private.key.file=$key"
+          done
+          echo "== wrong client secret"
+          $check --mode oauth "${oidc[@]}" "${creds[@]}" "${ca[@]}" \
+            -X sasl.oauthbearer.client.secret=wrong --expect-error "OAUTHBEARER token"
+          echo "== wrong CA"
+          requests=$(wc -l < "$dir/requests.jsonl")
+          $check --mode oauth "${oidc[@]}" "${creds[@]}" \
+            -X "https.ca.location=$dir/wrong-ca.pem" \
+            -X sasl.oauthbearer.client.secret=tls-check-secret --expect-error "OAUTHBEARER token"
+          test "$(wc -l < "$dir/requests.jsonl")" -eq "$requests"
+          python - "$dir/requests.jsonl" <<'PY'
+          import json, sys
+          seen = [json.loads(line) for line in open(sys.argv[1])]
+          print(seen)
+          assert {"grant_type": "client_credentials", "ok": True} in [
+              {k: r[k] for k in ("grant_type", "ok")} for r in seen]
+          for alg in ("RS256", "ES256"):
+              assert any(r.get("alg") == alg and r["ok"] for r in seen), alg
+          assert any(r["grant_type"] == "client_credentials" and not r["ok"] for r in seen)
+          print("PASS: the endpoint saw every expected request")
+          PY
