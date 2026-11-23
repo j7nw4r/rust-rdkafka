@@ -149,8 +149,10 @@ to where librdkafka was built.
 
 On Windows, the experimental `schannel` feature uses Schannel for broker TLS
 and BCrypt for SASL SCRAM crypto, with no OpenSSL. For mTLS, the client
-certificate and key must be in a Windows store. Read [Schannel and
-BCrypt][rdkafka-sys-schannel] before you use it.
+certificate and key must be in a Windows store. `gssapi-sspi`,
+`schannel-dynamic-linking` and `schannel-static-linking` are its Windows
+alternatives to `gssapi`, `dynamic-linking` and `static-linking`. Read
+[Schannel and BCrypt][rdkafka-sys-schannel] before you use them.
 
 For a full listing of features, consult the [rdkafka-sys crate's
 documentation][rdkafka-sys-features]. All of rdkafka-sys features are

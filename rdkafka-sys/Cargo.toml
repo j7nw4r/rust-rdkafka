@@ -61,6 +61,19 @@ ssl-vendored = ["ssl", "openssl-sys/vendored"]
 # statically with CMake. Conflicts with `ssl`, `gssapi` and `curl`.
 schannel = ["cmake-build"]
 
+# Experimental, Windows only. SASL GSSAPI (Kerberos) through Windows SSPI with
+# the logged-on user's credentials. Enables `schannel`; needs no Cyrus SASL.
+gssapi-sspi = ["schannel"]
+
+# Experimental, Windows only. Like `schannel`, but builds librdkafka as
+# rdkafka.dll and links it dynamically. Ship rdkafka.dll with the binary.
+schannel-dynamic-linking = ["schannel"]
+
+# Experimental, Windows only. Links a prebuilt static Schannel and BCrypt
+# librdkafka from the install prefix in DEP_LIBRDKAFKA_STATIC_ROOT, after a
+# check of its object files, instead of building one.
+schannel-static-linking = ["schannel"]
+
 # Enable SASL GSSAPI support with Cyrus libsasl2.
 gssapi = ["ssl", "sasl2-sys"]
 

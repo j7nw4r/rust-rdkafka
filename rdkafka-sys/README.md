@@ -138,6 +138,43 @@ distinct keys, consumes them back and compares every key and value. Run it
 with `--help` for the other modes and options. It needs no Windows-specific
 code, so it also builds without `schannel`.
 
+#### Windows alternatives to `gssapi`, `dynamic-linking` and `static-linking`
+
+These features conflict with `schannel`. Each of the features below enables
+`schannel` and fails on a target that is not Windows.
+
+  * **`gssapi-sspi`**: SASL GSSAPI (Kerberos) through Windows SSPI, with the
+    credentials of the logged-on user. It needs no Cyrus SASL or OpenSSL.
+    The `schannel` build already includes SSPI, so this feature is an
+    explicit request for it: the build fails unless librdkafka was built
+    with `WITH_SASL`. Set `sasl.mechanisms=GSSAPI` and
+    `sasl.kerberos.service.name`. CI checks only that librdkafka selects the
+    `Win32 SSPI` provider. Kerberos against a real KDC or Active Directory
+    has not been tested.
+  * **`schannel-dynamic-linking`**: builds librdkafka as `rdkafka.dll` with
+    the same Schannel and BCrypt settings and links it dynamically. The
+    build checks the generated `config.h`. `cargo run` and `cargo test`
+    find the DLL in `target/<profile>/build/rdkafka-sys-*/out/bin`. To run
+    the binary in another way, put `rdkafka.dll` next to the `.exe`.
+  * **`schannel-static-linking`**: links a prebuilt static librdkafka
+    instead of building one. Set `DEP_LIBRDKAFKA_STATIC_ROOT` to its CMake
+    install prefix, which must have `lib/rdkafka.lib`. The build reads the
+    object names in that archive. It fails unless the archive has the
+    Schannel and BCrypt objects and no OpenSSL TLS object, so an import
+    library or an OpenSSL build is refused. Build the library with the same
+    CMake settings as the `schannel` feature and `RDKAFKA_BUILD_STATIC=ON`.
+    If it uses zlib, zstd or curl, also link those libraries.
+
+```sh
+cmake -S rdkafka-sys/librdkafka -B build -DRDKAFKA_TLS_BACKEND=schannel \
+  -DRDKAFKA_CRYPTO_BACKEND=bcrypt -DRDKAFKA_BUILD_STATIC=ON -DWITH_SASL=ON \
+  -DWITH_CURL=OFF -DWITH_ZLIB=OFF -DWITH_ZSTD=OFF -DENABLE_LZ4_EXT=OFF
+cmake --build build --config Release
+cmake --install build --config Release --prefix C:/rdkafka-schannel
+set DEP_LIBRDKAFKA_STATIC_ROOT=C:/rdkafka-schannel
+cargo build --no-default-features --features schannel-static-linking
+```
+
 [`feat/tls-crypto-backends`]: https://github.com/j7nw4r/librdkafka/tree/feat/tls-crypto-backends
 [`docs/TLS-CRYPTO-BACKENDS.md`]: https://github.com/j7nw4r/librdkafka/blob/32a4e8ec3374afb63c58fd4391cf67eced0f14ee/docs/TLS-CRYPTO-BACKENDS.md
 [`docs/SCHANNEL-ADAPTER.md`]: https://github.com/j7nw4r/librdkafka/blob/32a4e8ec3374afb63c58fd4391cf67eced0f14ee/docs/SCHANNEL-ADAPTER.md
