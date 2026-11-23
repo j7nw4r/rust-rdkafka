@@ -187,8 +187,9 @@ cargo run --features aws-lc-rs-fips -- --provider aws-lc-rs-fips --fips \
   --brokers localhost:9093 --topic test
 ```
 
-On Windows, use `--no-default-features --features cng` and
-`--provider cng`. This crate has not been tested on Windows yet.
+On Windows, use `--no-default-features --features cng,rdkafka/libz-static`
+and `--provider cng`. CI runs the test on Windows with `cng`. A broker
+roundtrip and Windows FIPS mode have not been tested on Windows yet.
 
 [`feat/tls-backends-fips`]: https://github.com/j7nw4r/librdkafka/tree/feat/tls-backends-fips
 [`docs/TLS-BACKENDS.md`]: https://github.com/j7nw4r/librdkafka/blob/feat/tls-backends-fips/docs/TLS-BACKENDS.md
