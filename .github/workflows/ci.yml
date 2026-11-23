@@ -150,6 +150,11 @@ jobs:
           - os: macos-15
           - os: windows-2025
             args: --no-default-features --features cng,rdkafka/libz-static
+            provider: cng
+          # Empty and refused, because the runner is not in FIPS mode.
+          - os: windows-2025
+            args: --no-default-features --features cng,rdkafka/libz-static
+            provider: cng-fips
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -159,3 +164,5 @@ jobs:
           toolchain: ${{ env.rust_version }}
       - run: cargo test ${{ matrix.args }} -- --nocapture
         working-directory: examples/rustls
+        env:
+          RDKAFKA_TEST_PROVIDER: ${{ matrix.provider }}
