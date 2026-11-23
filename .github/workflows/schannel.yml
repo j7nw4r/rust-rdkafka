@@ -45,7 +45,7 @@ jobs:
         run: |
           set -euo pipefail
           check=target/debug/examples/tls_check.exe
-          $check --mode features --expect-features ssl,crypto,tls_schannel,crypto_bcrypt,sasl_scram
+          $check --mode features --expect-features ssl,auth_crypto,tls_schannel,auth_crypto_bcrypt,sasl_scram
           if $check --mode features --expect-features tls_openssl; then
             echo "FAIL: OpenSSL TLS is present"; exit 1
           fi
@@ -58,10 +58,14 @@ jobs:
           tls="-X security.protocol=ssl -X ssl.ca.location=ca.pem"
           $check --mode create $tls
           $check --mode create $tls -X ssl.certificate.location=client.pem \
-            -X ssl.key.location=client.key --expect-error ssl.schannel.certificate
-          $check --mode create $tls -X ssl.key.location=client.key \
-            -X ssl.schannel.certificate=CurrentUser/My/0000000000000000000000000000000000000000 \
+            -X ssl.key.location=client.key \
+            --expect-error "Schannel cannot use this ephemeral private-key identity"
+          store=ssl.certificate.store=CurrentUser/My/0000000000000000000000000000000000000000
+          $check --mode create $tls -X ssl.key.location=client.key -X $store \
             --expect-error "mutually exclusive"
+          $check --mode create $tls -X $store --expect-error "ssl.certificate.store: no certificate"
+          $check --mode create $tls -X ssl.key.password=secret \
+            --expect-error "OpenSSL-only; this build uses Schannel TLS"
           $check --mode create -X security.protocol=sasl_ssl -X ssl.ca.location=ca.pem \
             -X sasl.mechanisms=SCRAM-SHA-512 -X sasl.username=user -X sasl.password=secret
           $check --mode metadata $tls -X bootstrap.servers=127.0.0.1:1 --timeout 5 \
@@ -107,7 +111,7 @@ jobs:
           for _ in $(seq 1 60); do [ -f "$dir/token-url" ] && break; sleep 1; done
           check=target/debug/examples/tls_check.exe
           $check --mode features \
-            --expect-features ssl,crypto,tls_schannel,crypto_bcrypt,sasl_oauthbearer,http,oidc
+            --expect-features ssl,auth_crypto,tls_schannel,auth_crypto_bcrypt,sasl_oauthbearer,http,oidc
           # One token request can take the HTTP timeout (20 s) plus retries.
           check="$check --timeout 120"
           oidc=(-X bootstrap.servers=127.0.0.1:1 -X security.protocol=sasl_plaintext
@@ -143,9 +147,13 @@ jobs:
           for _ in $(seq 1 60); do [ -f "$nocdp/token-url" ] && break; sleep 1; done
           url=$(cat "$dir/token-url")
           nocdp_url=$(cat "$nocdp/token-url")
-          $check --mode oauth "${oidc[@]/$url/$nocdp_url}" \
-            "${creds[@]}" -X "https.ca.location=$nocdp/ca.pem" \
-            -X sasl.oauthbearer.client.secret=tls-check-secret --expect-error "revocation"
+          nocdp_args=("${oidc[@]/$url/$nocdp_url}" "${creds[@]}" -X "https.ca.location=$nocdp/ca.pem"
+            -X sasl.oauthbearer.client.secret=tls-check-secret)
+          $check --mode oauth "${nocdp_args[@]}" --expect-error "revocation"
+          $check --mode oauth "${nocdp_args[@]}" -X https.revocation.check=default \
+            --expect-error "revocation"
+          echo "== same certificate, https.revocation.check=best_effort"
+          $check --mode oauth "${nocdp_args[@]}" -X https.revocation.check=best_effort
           python - "$dir/requests.jsonl" <<'PY'
           import json, sys
           seen = [json.loads(line) for line in open(sys.argv[1])]
@@ -176,7 +184,7 @@ jobs:
         run: |
           set -euo pipefail
           check=target/debug/examples/tls_check.exe
-          $check --mode features --expect-features sasl,sasl_gssapi,tls_schannel,crypto_bcrypt
+          $check --mode features --expect-features sasl,sasl_gssapi,tls_schannel,auth_crypto_bcrypt
           gssapi=(-X sasl.mechanisms=GSSAPI -X sasl.kerberos.service.name=kafka)
           $check --mode create "${gssapi[@]}" -X security.protocol=sasl_plaintext \
             -X debug=security --log-level 7 2>&1 | tee create.log
@@ -226,7 +234,7 @@ jobs:
         run: |
           set -euo pipefail
           check=target/debug/examples/tls_check.exe
-          $check --mode features --expect-features ssl,crypto,tls_schannel,crypto_bcrypt,sasl_scram
+          $check --mode features --expect-features ssl,auth_crypto,tls_schannel,auth_crypto_bcrypt,sasl_scram
           $check --mode create -X security.protocol=sasl_ssl -X sasl.mechanisms=SCRAM-SHA-512 \
             -X sasl.username=user -X sasl.password=secret
           $check --mode metadata -X security.protocol=ssl -X bootstrap.servers=127.0.0.1:1 \
@@ -269,7 +277,7 @@ jobs:
           export DEP_LIBRDKAFKA_STATIC_ROOT="$RUNNER_TEMP/rdkafka-schannel"
           cargo build --no-default-features --features schannel-static-linking --example tls_check
           check=target/debug/examples/tls_check.exe
-          $check --mode features --expect-features ssl,crypto,tls_schannel,crypto_bcrypt,sasl_scram
+          $check --mode features --expect-features ssl,auth_crypto,tls_schannel,auth_crypto_bcrypt,sasl_scram
           $check --mode metadata -X security.protocol=ssl -X bootstrap.servers=127.0.0.1:1 \
             --timeout 5 --expect-error metadata
           python .github/scripts/check_imports.py $check bcrypt.dll ncrypt.dll crypt32.dll secur32.dll
