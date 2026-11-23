@@ -1,0 +1,65 @@
+name: schannel
+
+# Schannel TLS and BCrypt crypto exist only on Windows. This workflow runs on
+# changes that can affect that build. The checks need no broker.
+on:
+  push:
+    paths:
+      - ".github/workflows/schannel.yml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "examples/tls_check.rs"
+      - "rdkafka-sys/**"
+      - "src/**"
+  pull_request:
+    branches: [master]
+    paths:
+      - ".github/workflows/schannel.yml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "examples/tls_check.rs"
+      - "rdkafka-sys/**"
+      - "src/**"
+  workflow_dispatch:
+
+env:
+  rust_version: 1.85
+
+jobs:
+  schannel:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lukka/get-cmake@latest
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.rust_version }}
+      - run: cargo build --features schannel,libz-static --example tls_check
+      - name: Offline tls_check checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          check=target/debug/examples/tls_check.exe
+          $check --mode features --expect-features ssl,crypto,tls_schannel,crypto_bcrypt,sasl_scram
+          if $check --mode features --expect-features tls_openssl; then
+            echo "FAIL: OpenSSL TLS is present"; exit 1
+          fi
+          openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj "/CN=tls-check-ca" \
+            -keyout ca.key -out ca.pem
+          openssl req -newkey rsa:2048 -nodes -subj "/CN=tls-check-client" \
+            -keyout client.key -out client.csr
+          openssl x509 -req -in client.csr -CA ca.pem -CAkey ca.key -CAcreateserial \
+            -days 2 -out client.pem
+          tls="-X security.protocol=ssl -X ssl.ca.location=ca.pem"
+          $check --mode create $tls
+          $check --mode create $tls -X ssl.certificate.location=client.pem \
+            -X ssl.key.location=client.key --expect-error ssl.schannel.certificate
+          $check --mode create $tls -X ssl.key.location=client.key \
+            -X ssl.schannel.certificate=CurrentUser/My/0000000000000000000000000000000000000000 \
+            --expect-error "mutually exclusive"
+          $check --mode create -X security.protocol=sasl_ssl -X ssl.ca.location=ca.pem \
+            -X sasl.mechanisms=SCRAM-SHA-512 -X sasl.username=user -X sasl.password=secret
+          $check --mode metadata $tls -X bootstrap.servers=127.0.0.1:1 --timeout 5 \
+            --expect-error "metadata"
+      - run: cargo test --features schannel,libz-static
+        working-directory: rdkafka-sys
